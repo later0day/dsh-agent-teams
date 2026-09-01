@@ -992,13 +992,12 @@ console.log('quality-gates TDD — tool-level closed loop')
       listeners.set(name, current)
       return () => listeners.set(name, current.filter((item) => item !== listener))
     },
-    agents: { get(id) { return liveAgents.get(id) } },
+    agents: { get(id) { return liveAgents.get(id) }, list() { return [...liveAgents.values()] } },
     llm: {
       async resolveCallConfig(config) { return config },
       async listModels() { return [] },
     },
     subagents: {
-      registerContinuableSetup() { return () => {} },
       getProvider(name) {
         if (name !== 'spawn') return undefined
         return { prepareContinuable() {}, capabilities: { persona: true, toolFilter: true } }

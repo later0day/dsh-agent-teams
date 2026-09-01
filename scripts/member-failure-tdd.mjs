@@ -62,25 +62,35 @@ async function fixture(t, { captainStatus = 'idle', fallback, captainOffline = f
     tasks: [{ id: 't1', subject: 'work', assignee: 'worker', status: 'in_progress', dependencies: [], attempt: 1, attemptId: 'a1', createdAt: 1, updatedAt: 1 }],
   })
   let setup
+  let teardown
   const ctx = {
     logger: { debug() {}, warn(message) { warnings.push(message) } },
-    agents: { get(id) { return id === child.id ? child : id === captain.id && !captainOffline ? captain : undefined } },
-    on() { return () => {} },
+    agents: {
+      get(id) { return id === child.id ? child : id === captain.id && !captainOffline ? captain : undefined },
+      list() { return [] },
+    },
+    on(name, listener) {
+      if (name === 'agent/created') setup = listener
+      if (name === 'agent/disposed') teardown = listener
+      return () => {}
+    },
+    effect() { return () => {} },
     subagents: {
-      registerContinuableSetup(fn) { setup = fn },
       async followup(_captain, id, content) { deliveries.push({ id, content }); return 'accepted' },
     },
   }
+  // alpha.4: the member runtime attaches per-child setup on agent/created, and
+  // reads the child scope from agent.ctx (the removed registerContinuableSetup
+  // used to hand the plugin that child context directly). Per-child teardown
+  // now fires through agent/disposed.
+  child.ctx = { on(name, listener) { listeners.set(name, listener); return () => listeners.delete(name) } }
   const scheduler = installTeamScheduler(ctx, { stateDir: '.agent-teams' })
   const runtime = installMemberSelectionRuntime(ctx, '.agent-teams', (workspace, teamId, memberName) => (
     scheduler.kickMember(workspace, teamId, memberName)
   ))
   const dispose = await runtime.withPending(captain.id, 'agent-teams:team:worker', {
     provider: 'fake', model: 'primary', ...fallback ? { fallback } : {},
-  }, () => setup({
-    agent: child,
-    on(name, listener) { listeners.set(name, listener); return () => listeners.delete(name) },
-  }))
+  }, () => { setup({ agent: child }); return () => teardown?.({ agent: child }) })
   t.after(dispose)
   let retryHandler
   let projection

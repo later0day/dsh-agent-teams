@@ -1331,20 +1331,23 @@ function descriptorEvent(label, agentProvider = 'descriptor-provider', agentMode
   }
 }
 
-function fakeChildContext({ label, parentSessionId, cwd, agentProvider, agentModel }) {
+function fakeChildAgent({ id, label, parentSessionId, cwd, agentProvider, agentModel }) {
   const listeners = new Map()
   return {
     listeners,
-    context: {
-      agent: {
-        session: {
-          header: { parentSession: parentSessionId, cwd, seedLength: 0 },
-          events: [descriptorEvent(label, agentProvider, agentModel)],
-        },
+    agent: {
+      id,
+      status: 'idle',
+      whenIdle: async () => undefined,
+      session: {
+        header: { parentSession: parentSessionId, cwd, seedLength: 0 },
+        events: [descriptorEvent(label, agentProvider, agentModel)],
       },
-      on(name, listener) {
-        listeners.set(name, listener)
-        return () => listeners.delete(name)
+      ctx: {
+        on(name, listener) {
+          listeners.set(name, listener)
+          return () => listeners.delete(name)
+        },
       },
     },
   }
@@ -1361,16 +1364,28 @@ async function routedConfig(child) {
   }))
 }
 
-let setupMemberSelection
+// alpha.4 root-context fake: the member runtime now attaches its per-child setup
+// through the agent/created lifecycle event on the plugin context, not the
+// removed ctx.subagents.registerContinuableSetup hook.
+let onAgentCreated
 const selectionRuntime = installMemberSelectionRuntime({
-  subagents: {
-    registerContinuableSetup: (setup) => {
-      setupMemberSelection = setup
-      return () => undefined
-    },
+  agents: { list: () => [] },
+  on(name, listener) {
+    if (name === 'agent/created') onAgentCreated = listener
+    return () => undefined
   },
+  effect: () => () => undefined,
+  logger: { warn: () => undefined },
 }, '.agent-teams')
-const freshChild = fakeChildContext({
+const setupMemberSelection = (child) => {
+  onAgentCreated({ agent: child.agent })
+  return () => {
+    for (const dispose of child.listeners.values()) void dispose
+    child.listeners.clear()
+  }
+}
+const freshChild = fakeChildAgent({
+  id: 'fresh-member',
   label: 'agent-teams:fresh-team:backend',
   parentSessionId: 'captain-session',
   cwd: process.cwd(),
@@ -1381,7 +1396,7 @@ await selectionRuntime.withPending(
   'agent-teams:fresh-team:backend',
   overriddenSelection,
   async () => {
-    disposeFresh = setupMemberSelection(freshChild.context)
+    disposeFresh = setupMemberSelection(freshChild)
   },
 )
 const freshRoute = await routedConfig(freshChild)
@@ -1413,14 +1428,15 @@ try {
     tasks: [],
     taskSeq: 0,
   })
-  const coldChild = fakeChildContext({
+  const coldChild = fakeChildAgent({
+    id: 'cold-member',
     label: 'agent-teams:restore-team:reviewer',
     parentSessionId: 'captain-session',
     cwd: restoreWorkspace,
     agentProvider: 'cold-provider',
     agentModel: 'cold-model',
   })
-  const disposeCold = setupMemberSelection(coldChild.context)
+  const disposeCold = setupMemberSelection(coldChild)
   const coldRoute = await routedConfig(coldChild)
   check(
     'cold-resumed child restores provider, model, and reasoning from team.json',

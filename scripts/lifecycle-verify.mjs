@@ -24,7 +24,6 @@ const children = []
 const deliveries = []
 const listeners = new Map()
 const childListeners = new Map()
-const continuableSetups = []
 const failNextDelivery = new Set()
 const failures = []
 let childSeq = 0
@@ -48,11 +47,25 @@ function session(parentSession) {
 }
 
 function makeAgent(id, parentSession) {
+  // The plugin installs its per-child listeners through agent.ctx (alpha.4
+  // replaced ctx.subagents.registerContinuableSetup with agent/created +
+  // agent.ctx). Record them in a per-child registry so this harness can
+  // dispatch model selection and the agent/request-error bridge to one child.
+  const registry = new Map()
+  childListeners.set(id, registry)
   return {
     id,
     status: 'idle',
     options: { provider: 'fake', model: 'fake-model' },
     session: session(parentSession),
+    ctx: {
+      on(name, listener) {
+        const current = registry.get(name) ?? []
+        current.push(listener)
+        registry.set(name, current)
+        return () => registry.set(name, (registry.get(name) ?? []).filter(candidate => candidate !== listener))
+      },
+    },
     followups: [],
     steers: [],
     injections: [],
@@ -80,25 +93,6 @@ function publishStatus(subject, status) {
     subject._idle = undefined
   }
   for (const listener of listeners.get('agent/status') ?? []) listener({ agent: subject, status })
-}
-
-/**
- * Compose one child's scoped context like the harness does, so the plugin's
- * continuable setup can install its per-child listeners (model selection and
- * the `agent/request-error` bridge) against a dispatchable registry.
- */
-function childContext(child) {
-  const registry = new Map()
-  childListeners.set(child.id, registry)
-  return {
-    agent: child,
-    on(name, listener) {
-      const current = registry.get(name) ?? []
-      current.push(listener)
-      registry.set(name, current)
-      return () => registry.set(name, (registry.get(name) ?? []).filter(candidate => candidate !== listener))
-    },
-  }
 }
 
 /** Dispatch one failed model request to a child's request-error listeners. */
@@ -153,6 +147,9 @@ const ctx = {
     get(id) {
       return liveAgents.get(id)
     },
+    list() {
+      return [...liveAgents.values()]
+    },
   },
   llm: {
     async resolveCallConfig(config) {
@@ -163,10 +160,6 @@ const ctx = {
     },
   },
   subagents: {
-    registerContinuableSetup(setup) {
-      continuableSetups.push(setup)
-      return () => {}
-    },
     getProvider(name) {
       if (name !== 'spawn') return undefined
       return { prepareContinuable() {}, capabilities: { persona: true, toolFilter: true } }
@@ -193,7 +186,7 @@ const ctx = {
           },
         }]
       }
-      for (const setup of continuableSetups) setup(childContext(child))
+      for (const listener of listeners.get('agent/created') ?? []) listener({ agent: child })
       return { childId: id, messageId: `welcome-${childSeq}` }
     },
     async listChildren(parentId) {

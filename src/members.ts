@@ -363,9 +363,14 @@ export function installMemberSelectionRuntime(
   onFailureSettled?: (workspace: string, teamId: string, memberName: string) => Promise<void>,
 ): MemberSelectionRuntime {
   const pending = new Map<string, MemberLlmSelection>()
-  ctx.subagents.registerContinuableSetup((childCtx) => {
-    const child = childCtx.agent
-    if (child === undefined) return () => undefined
+  const installed = new Map<Agent, () => void>()
+  // Harness alpha.4 removed ctx.subagents.registerContinuableSetup. Its per-child
+  // extension point is now agent/created: the published payload is the fresh or
+  // cold-resumed child Agent, and agent.ctx is its agent-local scope (unwinding
+  // on the child's disposal) — the exact scope the removed setup callback
+  // received. Mirrors the harness's own experimental/tool-agent-team migration.
+  const setupMember = (child: Agent): (() => void) => {
+    const childCtx = child.ctx
     const suffix = child.session.events.slice(child.session.header.seedLength ?? 0)
     const descriptor = foldSubagentDescriptor(suffix)
     if (descriptor?.mode !== 'continuable' || !descriptor.label.startsWith(MEMBER_LABEL_PREFIX)) {
@@ -464,7 +469,24 @@ export function installMemberSelectionRuntime(
       disposeSelection()
       disposeFailure()
     }
+  }
+
+  const maybeSetup = (child: Agent): void => {
+    if (installed.has(child)) return
+    installed.set(child, setupMember(child))
+  }
+  // A cold resume can republish a member before this runtime mounts; sweep the
+  // live registry once, then follow subsequent creations.
+  for (const agent of ctx.agents.list()) maybeSetup(agent)
+  ctx.on('agent/created', ({ agent }) => { maybeSetup(agent) })
+  ctx.on('agent/disposed', ({ agent }) => {
+    installed.get(agent)?.()
+    installed.delete(agent)
   })
+  ctx.effect(() => () => {
+    for (const dispose of installed.values()) dispose()
+    installed.clear()
+  }, 'agent-teams.memberSelectionRuntime()')
 
   return {
     async withPending<T>(

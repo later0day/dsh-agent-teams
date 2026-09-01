@@ -46,11 +46,20 @@ function session(parentSession) {
 }
 
 function makeAgent(id, parentSession) {
+  const listeners = new Map()
   return {
     id,
     status: 'idle',
     options: { provider: 'stress', model: 'stress-model' },
     session: session(parentSession),
+    ctx: {
+      on(name, listener) {
+        const current = listeners.get(name) ?? []
+        current.push(listener)
+        listeners.set(name, current)
+        return () => listeners.set(name, current.filter(candidate => candidate !== listener))
+      },
+    },
     steer() {},
     cancel() {},
     whenIdle() {
@@ -92,6 +101,9 @@ function mountRuntime() {
       get(id) {
         return liveAgents.get(id)
       },
+      list() {
+        return [...liveAgents.values()]
+      },
     },
     llm: {
       async resolveCallConfig(config) {
@@ -102,9 +114,6 @@ function mountRuntime() {
       },
     },
     subagents: {
-      registerContinuableSetup() {
-        return () => {}
-      },
       getProvider(name) {
         if (name !== 'spawn') return undefined
         return { prepareContinuable() {}, capabilities: { persona: true, toolFilter: true } }
