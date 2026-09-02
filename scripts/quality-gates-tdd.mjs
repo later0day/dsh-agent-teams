@@ -968,8 +968,8 @@ console.log('quality-gates TDD — tool-level closed loop')
     status: 'idle',
     options: { provider: 'fake', model: 'fake-model' },
     session: {
-      header: { cwd: workspace, seedLength: 0 },
-      events: [],
+      header: { cwd: workspace },
+      ownEvents: () => [],
       append() {},
       requestHeader() {
         return { config: { provider: 'fake', model: 'fake-model', reasoningEffort: 'high' } }
@@ -1021,7 +1021,8 @@ console.log('quality-gates TDD — tool-level closed loop')
       },
       async listChildren() { return children },
       async listDescendants() { return children },
-      async followup() { return `message-${childSeq}` },
+      [Symbol.for('dsh.subagent.queuePrompt')]() { return Promise.resolve(`message-${childSeq}`) },
+      sendMessage() { return Promise.resolve(`message-${childSeq}`) },
       interrupt() {},
     },
     logger: { debug() {}, warn() {} },
@@ -1094,8 +1095,8 @@ console.log('quality-gates TDD — tool-level closed loop')
       status: 'idle',
       options: { provider: 'fake', model: 'fake-model' },
       session: {
-        header: { cwd: workspace, seedLength: 0 },
-        events: [],
+        header: { cwd: workspace },
+        ownEvents: () => [],
         append() {},
         requestHeader() {
           return { config: { provider: 'fake', model: 'fake-model', reasoningEffort: 'high' } }

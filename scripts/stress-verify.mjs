@@ -35,9 +35,10 @@ function check(label, condition, detail = '') {
 }
 
 function session(parentSession) {
+  const events = []
   return {
-    header: { cwd: workspace, parentSession, seedLength: 0 },
-    events: [],
+    header: { cwd: workspace, parentSession },
+    ownEvents: () => events,
     append() {},
     requestHeader() {
       return { config: { provider: 'stress', model: 'stress-model', reasoningEffort: 'high' } }
@@ -141,21 +142,31 @@ function mountRuntime() {
       async listDescendants(parentId) {
         return this.listChildren(parentId)
       },
-      async followup(_parent, childId, content) {
+      [Symbol.for('dsh.subagent.queuePrompt')](_parent, childId, content) {
         const remaining = failDeliveryCount.get(childId) ?? 0
         if (remaining > 0) {
           failDeliveryCount.set(childId, remaining - 1)
-          throw new Error('injected followup failure')
+          throw new Error('injected delivery failure')
         }
         let child = liveAgents.get(childId)
         if (child === undefined) {
-          // Harness cold-resumes a continuable child on a waking followup.
+          // Harness cold-resumes a continuable child on a waking host delivery.
           child = makeAgent(childId, captain.id)
           liveAgents.set(childId, child)
         }
         child.status = 'running'
         deliveries.push({ childId, content, runtime: runtime?.generation ?? 0 })
-        return `message-${++messageSeq}`
+        return Promise.resolve(`message-${++messageSeq}`)
+      },
+      sendMessage(_sender, childId, content) {
+        let child = liveAgents.get(childId)
+        if (child === undefined) {
+          child = makeAgent(childId, captain.id)
+          liveAgents.set(childId, child)
+        }
+        child.status = 'running'
+        deliveries.push({ childId, content, runtime: runtime?.generation ?? 0 })
+        return Promise.resolve(`message-${++messageSeq}`)
       },
       interrupt(childId) {
         const child = liveAgents.get(childId)

@@ -36,9 +36,11 @@ function check(label, condition, detail = '') {
 }
 
 function session(parentSession) {
+  const events = []
   return {
-    header: { cwd: workspace, parentSession, seedLength: 0 },
-    events: [],
+    header: { cwd: workspace, parentSession },
+    ownEvents: () => events,
+    seedEvents(next) { events.length = 0; events.push(...next) },
     append() {},
     requestHeader() {
       return { config: { provider: 'fake', model: 'fake-model', reasoningEffort: 'high' } }
@@ -174,7 +176,7 @@ const ctx = {
       liveAgents.set(id, child)
       children.push({ id, label: spec.label, mode: 'continuable' })
       if (typeof spec.label === 'string' && spec.label.startsWith('agent-teams:')) {
-        child.session.events = [{
+        child.session.seedEvents([{
           type: 'subagent/descriptor',
           data: {
             version: 3,
@@ -184,7 +186,7 @@ const ctx = {
             agentProvider: spec.request?.agentOptions?.provider ?? 'fake',
             agentModel: spec.request?.agentOptions?.model ?? 'fake-model',
           },
-        }]
+        }])
       }
       for (const listener of listeners.get('agent/created') ?? []) listener({ agent: child })
       return { childId: id, messageId: `welcome-${childSeq}` }
@@ -201,12 +203,20 @@ const ctx = {
     async listDescendants(parentId) {
       return this.listChildren(parentId)
     },
-    async followup(_parent, childId, content) {
+    [Symbol.for('dsh.subagent.queuePrompt')](_parent, childId, content) {
       if (failNextDelivery.delete(childId)) throw new Error('injected delivery failure')
       deliveries.push({ childId, content })
       const child = liveAgents.get(childId)
       if (child) child.status = 'running'
-      return `message-${++messageSeq}`
+      return Promise.resolve(`message-${++messageSeq}`)
+    },
+    // alpha.5 model-authored delivery path; the retirement guard wraps it too.
+    sendMessage(_sender, childId, content) {
+      if (failNextDelivery.delete(childId)) throw new Error('injected delivery failure')
+      deliveries.push({ childId, content })
+      const child = liveAgents.get(childId)
+      if (child) child.status = 'running'
+      return Promise.resolve(`message-${++messageSeq}`)
     },
     interrupt(childId) {
       const child = liveAgents.get(childId)
@@ -929,13 +939,13 @@ try {
   let removedFollowupRejected = false
   const deliveriesBeforeRemovedFollowup = deliveries.length
   try {
-    await ctx.subagents.followup(captain, alpha.id, [{ type: 'text', text: 'must not resume' }], {
-      source: { kind: 'plugin', plugin: 'verification' }, signal: new AbortController().signal,
+    await ctx.subagents.sendMessage(captain, alpha.id, [{ type: 'text', text: 'must not resume' }], {
+      signal: new AbortController().signal,
     })
   } catch (error) {
     removedFollowupRejected = error?.code === 'NOT_RESUMABLE'
   }
-  check('removing a member blocks direct followup before resume',
+  check('removing a member blocks direct resume before delivery',
     removedFollowupRejected && deliveries.length === deliveriesBeforeRemovedFollowup)
   let removedRejected = false
   try {
@@ -1129,8 +1139,8 @@ try {
   let coldFollowupRejected = false
   const deliveriesBeforeColdFollowup = deliveries.length
   try {
-    await ctx.subagents.followup(captain, gamma.id, [{ type: 'text', text: 'must stay retired' }], {
-      source: { kind: 'plugin', plugin: 'verification' }, signal: new AbortController().signal,
+    await ctx.subagents.sendMessage(captain, gamma.id, [{ type: 'text', text: 'must stay retired' }], {
+      signal: new AbortController().signal,
     })
   } catch (error) {
     coldFollowupRejected = error?.code === 'NOT_RESUMABLE'
@@ -1140,12 +1150,12 @@ try {
   check('team shutdown leaves unrelated continuable subagents untouched',
     (await ctx.subagents.listChildren(captain.id))
       .some(child => child.id === 'foreign-session' && child.mode === 'continuable'))
-  const foreignFollowup = await ctx.subagents.followup(captain, 'foreign-session', [
+  const foreignFollowup = await ctx.subagents.sendMessage(captain, 'foreign-session', [
     { type: 'text', text: 'unrelated work still routes' },
   ], {
-    source: { kind: 'plugin', plugin: 'verification' }, signal: new AbortController().signal,
+    signal: new AbortController().signal,
   })
-  check('team shutdown leaves unrelated continuable followup untouched',
+  check('team shutdown leaves unrelated continuable delivery untouched',
     typeof foreignFollowup === 'string'
       && deliveries.some(delivery => delivery.childId === 'foreign-session'))
 

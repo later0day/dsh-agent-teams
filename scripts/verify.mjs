@@ -1340,8 +1340,8 @@ function fakeChildAgent({ id, label, parentSessionId, cwd, agentProvider, agentM
       status: 'idle',
       whenIdle: async () => undefined,
       session: {
-        header: { parentSession: parentSessionId, cwd, seedLength: 0 },
-        events: [descriptorEvent(label, agentProvider, agentModel)],
+        header: { parentSession: parentSessionId, cwd },
+        ownEvents: () => [descriptorEvent(label, agentProvider, agentModel)],
       },
       ctx: {
         on(name, listener) {

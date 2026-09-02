@@ -48,8 +48,8 @@ async function fixture(t, { captainStatus = 'idle', fallback, captainOffline = f
     id: 'worker-session', status: 'running',
     whenIdle: () => child.status === 'idle' ? Promise.resolve() : idle,
     session: {
-      header: { cwd: workspace, parentSession: captain.id, seedLength: 0 },
-      events: [{ type: 'subagent/descriptor', data: {
+      header: { cwd: workspace, parentSession: captain.id },
+      ownEvents: () => [{ type: 'subagent/descriptor', data: {
         version: 3, mode: 'continuable', provider: 'spawn', label: 'agent-teams:team:worker',
         agentProvider: 'fake', agentModel: 'primary',
       } }],
@@ -76,7 +76,10 @@ async function fixture(t, { captainStatus = 'idle', fallback, captainOffline = f
     },
     effect() { return () => {} },
     subagents: {
-      async followup(_captain, id, content) { deliveries.push({ id, content }); return 'accepted' },
+      // alpha.5 split ctx.subagents.followup into the model-authored
+      // sendMessage and the symbol-keyed host-protocol queue; deliverToMember
+      // routes host deliveries through queueHostSubagentPrompt -> this symbol.
+      [Symbol.for('dsh.subagent.queuePrompt')](_captain, id, content) { deliveries.push({ id, content }); return Promise.resolve('accepted') },
     },
   }
   // alpha.4: the member runtime attaches per-child setup on agent/created, and

@@ -4,7 +4,7 @@
  *
  * Members are durable continuable subagents of the captain, so a member keeps
  * its conversation across turns and across harness restarts: the captain
- * wakes it with {@link ctx.subagents.followup}, it works through its turn
+ * wakes it with {@link ctx.subagents.sendMessage}, it works through its turn
  * (updating team state through the `agent_teams_*` tools), and becomes idle
  * again. Its final assistant message is not readable programmatically, so the
  * member persists its report into the captain's mailbox and the task records,
@@ -16,6 +16,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent'
 // Declaration merge only: makes ctx.subagents visible.
 import { foldSubagentDescriptor, SubagentError } from '@deepseek-ai/dsh-subagent'
+import { type HostPromptQueue, queueHostSubagentPrompt, queueSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { createUserMessage, LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
@@ -371,7 +372,7 @@ export function installMemberSelectionRuntime(
   // received. Mirrors the harness's own experimental/tool-agent-team migration.
   const setupMember = (child: Agent): (() => void) => {
     const childCtx = child.ctx
-    const suffix = child.session.events.slice(child.session.header.seedLength ?? 0)
+    const suffix = child.session.ownEvents()
     const descriptor = foldSubagentDescriptor(suffix)
     if (descriptor?.mode !== 'continuable' || !descriptor.label.startsWith(MEMBER_LABEL_PREFIX)) {
       return () => undefined
@@ -674,13 +675,10 @@ export async function deliverToMember(
   signal: AbortSignal,
 ): Promise<boolean> {
   try {
-    await ctx.subagents.followup(captain, brandedSessionId(childId), [{ type: 'text', text }], {
-      source: { kind: 'plugin', plugin: 'dsh-agent-teams' },
-      signal,
-    })
+    await queueHostSubagentPrompt(ctx.subagents, captain, brandedSessionId(childId), [{ type: 'text', text }], { kind: 'plugin', plugin: 'dsh-agent-teams' }, signal)
     return true
   } catch (error: unknown) {
-    ctx.logger.warn(`agent-teams: followup to member ${childId} failed: ${String(error)}`)
+    ctx.logger.warn(`agent-teams: message delivery to member ${childId} failed: ${String(error)}`)
     return false
   }
 }
@@ -701,35 +699,52 @@ export function interruptMember(ctx: Context, captain: Agent, childId: string): 
 }
 
 /**
- * Install the missing per-child retirement boundary above Harness rc.6.
+ * Install the missing per-child retirement boundary.
  *
  * Upstream `interrupt()` deliberately preserves continuable sessions and the
  * upstream seam exposes no targeted forget/retire method. The durable
- * AgentTeams index therefore rejects `followup()` before it can cold-resume a
- * retired member. Catalog rows deliberately remain discoverable: Harness rc.8
- * uses the direct-child catalog to authorize historical transcript reads and
- * `openSubagent()`, so filtering those rows would make an archived member's
- * persisted conversation inaccessible. Exact ids keep unrelated subagents
- * untouched while the followup boundary still prevents further model turns.
+ * AgentTeams index therefore rejects a retired member before it can
+ * cold-resume. Harness alpha.5 split the single `followup` entry into two
+ * cold-resume paths — the model-authored `sendMessage` and the symbol-keyed
+ * host-protocol queue (`queueHostSubagentPrompt`) — so the boundary wraps both.
+ * Catalog rows deliberately remain discoverable: Harness uses the direct-child
+ * catalog to authorize historical transcript reads and `openSubagent()`, so
+ * filtering those rows would make an archived member's persisted conversation
+ * inaccessible. Exact ids keep unrelated subagents untouched while the resume
+ * boundary still prevents further model turns.
  */
 export function installRetiredMemberGuard(ctx: Context, stateDir: string): void {
   const runtime = ctx.subagents
   ctx.effect(() => {
-    const followup = runtime.followup
-    const guardedFollowup: typeof runtime.followup = async (parent, childId, content, options) => {
+    const rejectIfRetired = async (parent: Agent, targetId: SessionId): Promise<void> => {
       const retired = await readRetiredMemberIds(join(parent.session.header.cwd ?? process.cwd(), stateDir))
-      if (retired.has(childId)) {
+      if (retired.has(targetId)) {
         throw new SubagentError(
-          `AgentTeams member "${childId}" was retired and cannot be resumed`,
+          `AgentTeams member "${targetId}" was retired and cannot be resumed`,
           'NOT_RESUMABLE',
         )
       }
-      return followup.call(runtime, parent, childId, content, options)
     }
 
-    runtime.followup = guardedFollowup
+    const sendMessage = runtime.sendMessage.bind(runtime)
+    const guardedSendMessage: typeof runtime.sendMessage = async (sender, targetId, content, options) => {
+      await rejectIfRetired(sender, targetId)
+      return sendMessage(sender, targetId, content, options)
+    }
+
+    type QueueFace = { [queueSubagentPrompt]: HostPromptQueue[typeof queueSubagentPrompt] }
+    const queueHost = runtime as unknown as QueueFace
+    const queuePrompt = queueHost[queueSubagentPrompt].bind(runtime)
+    const guardedQueuePrompt: QueueFace[typeof queueSubagentPrompt] = async (parent, childId, content, source, signal) => {
+      await rejectIfRetired(parent, childId)
+      return queuePrompt(parent, childId, content, source, signal)
+    }
+
+    runtime.sendMessage = guardedSendMessage
+    queueHost[queueSubagentPrompt] = guardedQueuePrompt
     return () => {
-      if (runtime.followup === guardedFollowup) runtime.followup = followup
+      if (runtime.sendMessage === guardedSendMessage) runtime.sendMessage = sendMessage
+      if (queueHost[queueSubagentPrompt] === guardedQueuePrompt) queueHost[queueSubagentPrompt] = queuePrompt
     }
   }, 'agent-teams: retired member guard')
 }
