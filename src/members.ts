@@ -16,7 +16,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent'
 // Declaration merge only: makes ctx.subagents visible.
 import { foldSubagentDescriptor, SubagentError } from '@deepseek-ai/dsh-subagent'
-import { type HostPromptQueue, queueHostSubagentPrompt, queueSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
+import { type HostPromptDeliverer, deliverSubagentPrompt, queueHostSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { createUserMessage, LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
@@ -706,7 +706,12 @@ export function interruptMember(ctx: Context, captain: Agent, childId: string): 
  * AgentTeams index therefore rejects a retired member before it can
  * cold-resume. Harness alpha.5 split the single `followup` entry into two
  * cold-resume paths — the model-authored `sendMessage` and the symbol-keyed
- * host-protocol queue (`queueHostSubagentPrompt`) — so the boundary wraps both.
+ * host-protocol queue (`queueHostSubagentPrompt`) — so the boundary wraps
+ * both. Harness 0.1.3-alpha.1 then unified `queueHostSubagentPrompt` and
+ * `steerHostSubagentPrompt` onto one symbol-keyed method
+ * (`deliverSubagentPrompt`, mode `'queue' | 'steer'`), retiring the old
+ * queue-only symbol — the wrap below follows that symbol and forwards the
+ * mode through untouched, so both delivery paths still land on the guard.
  * Catalog rows deliberately remain discoverable: Harness uses the direct-child
  * catalog to authorize historical transcript reads and `openSubagent()`, so
  * filtering those rows would make an archived member's persisted conversation
@@ -732,19 +737,19 @@ export function installRetiredMemberGuard(ctx: Context, stateDir: string): void 
       return sendMessage(sender, targetId, content, options)
     }
 
-    type QueueFace = { [queueSubagentPrompt]: HostPromptQueue[typeof queueSubagentPrompt] }
-    const queueHost = runtime as unknown as QueueFace
-    const queuePrompt = queueHost[queueSubagentPrompt].bind(runtime)
-    const guardedQueuePrompt: QueueFace[typeof queueSubagentPrompt] = async (parent, childId, content, source, signal) => {
+    type DeliverFace = { [deliverSubagentPrompt]: HostPromptDeliverer[typeof deliverSubagentPrompt] }
+    const queueHost = runtime as unknown as DeliverFace
+    const deliverPrompt = queueHost[deliverSubagentPrompt].bind(runtime)
+    const guardedDeliverPrompt: DeliverFace[typeof deliverSubagentPrompt] = async (parent, childId, content, source, signal, delivery) => {
       await rejectIfRetired(parent, childId)
-      return queuePrompt(parent, childId, content, source, signal)
+      return deliverPrompt(parent, childId, content, source, signal, delivery)
     }
 
     runtime.sendMessage = guardedSendMessage
-    queueHost[queueSubagentPrompt] = guardedQueuePrompt
+    queueHost[deliverSubagentPrompt] = guardedDeliverPrompt
     return () => {
       if (runtime.sendMessage === guardedSendMessage) runtime.sendMessage = sendMessage
-      if (queueHost[queueSubagentPrompt] === guardedQueuePrompt) queueHost[queueSubagentPrompt] = queuePrompt
+      if (queueHost[deliverSubagentPrompt] === guardedDeliverPrompt) queueHost[deliverSubagentPrompt] = deliverPrompt
     }
   }, 'agent-teams: retired member guard')
 }
