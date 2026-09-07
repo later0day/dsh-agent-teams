@@ -12,6 +12,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { deliverSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { registerAgentTeamsTools } from '../lib/tools.js'
 import { readArchivedTeam, readTeam, readUnreadMailbox } from '../lib/state.js'
 
@@ -142,7 +143,7 @@ function mountRuntime() {
       async listDescendants(parentId) {
         return this.listChildren(parentId)
       },
-      [Symbol.for('dsh.subagent.queuePrompt')](_parent, childId, content) {
+      [deliverSubagentPrompt](_parent, childId, content) {
         const remaining = failDeliveryCount.get(childId) ?? 0
         if (remaining > 0) {
           failDeliveryCount.set(childId, remaining - 1)

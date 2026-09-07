@@ -9,6 +9,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { deliverSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { assignmentPrompt } from '../lib/scheduler.js'
 import { applyQualityFollowUp, haltTeamWork, registerAgentTeamsTools } from '../lib/tools.js'
 import { createTeamDir, readTeam } from '../lib/state.js'
@@ -1021,7 +1022,7 @@ console.log('quality-gates TDD — tool-level closed loop')
       },
       async listChildren() { return children },
       async listDescendants() { return children },
-      [Symbol.for('dsh.subagent.queuePrompt')]() { return Promise.resolve(`message-${childSeq}`) },
+      [deliverSubagentPrompt]() { return Promise.resolve(`message-${childSeq}`) },
       sendMessage() { return Promise.resolve(`message-${childSeq}`) },
       interrupt() {},
     },
