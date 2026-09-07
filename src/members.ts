@@ -20,6 +20,7 @@ import { type HostPromptDeliverer, deliverSubagentPrompt, queueHostSubagentPromp
 import { createUserMessage, LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
+import { guardSubagentDelivery, installContinuableMemberSetup, queueMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
 import { acknowledgeMailbox, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
@@ -258,12 +259,14 @@ function selectionFromMember(member: TeamMember | undefined): MemberLlmSelection
   const provider = (member.activeProvider ?? member.provider).trim()
   const model = (member.activeModel ?? member.model).trim()
   if (provider === '' || model === '') return undefined
-  const reasoningEffort = member.reasoningEffort?.trim()
+  // Effort ids belong to the original model. After a fallback, its own
+  // provider default remains authoritative, including after cold recovery.
+  const reasoningEffort = member.fallbackActive === true ? undefined : member.reasoningEffort?.trim()
   return {
     provider,
     model,
     ...reasoningEffort === undefined || reasoningEffort === '' ? {} : { reasoningEffort },
-    ...member.fallback === undefined ? {} : { fallback: member.fallback },
+    ...member.fallback === undefined || member.fallbackActive === true ? {} : { fallback: member.fallback },
   }
 }
 
@@ -457,6 +460,10 @@ export function installMemberSelectionRuntime(
       if (fallback !== undefined && transition.retry) {
         switched = transition.switched
         selectionRef.current = transition.selection
+        // Request recovery repeats buildRequest inside the current step; it
+        // does not re-run prompt assembly. Override that captured route too,
+        // otherwise the authorized retry would hit the failed primary again.
+        selectionRef.assembled = transition.selection
         await updateFallbackState(stateRoot, teamId, memberName, fallback, ctx).catch((error: unknown) => {
           ctx.logger.warn(`agent-teams: failed to persist fallback route: ${String(error)}`)
         })
@@ -641,6 +648,9 @@ export async function spawnMember(
         agentOptions: {
           provider: llmSelection.provider,
           model: llmSelection.model,
+          ...llmSelection.reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort: ReasoningEffortId(llmSelection.reasoningEffort) },
         },
         ...config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {},
       },

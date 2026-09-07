@@ -12,6 +12,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LlmError } from '@deepseek-ai/dsh-llm'
+import { deliverSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { haltTeamWork, registerAgentTeamsTools } from '../lib/tools.js'
 import { buildActivationDirective, invokedAgentTeamsGoal, invokedAgentTeamsInvocation, installAgentTeamsGestureBoundary, profileCommandName, registerAgentTeamsCommand } from '../lib/command.js'
 import { readArchivedTeam, readMailbox, readTeam, readUnreadMailbox } from '../lib/state.js'
@@ -203,7 +204,7 @@ const ctx = {
     async listDescendants(parentId) {
       return this.listChildren(parentId)
     },
-    [Symbol.for('dsh.subagent.queuePrompt')](_parent, childId, content) {
+    [deliverSubagentPrompt](_parent, childId, content) {
       if (failNextDelivery.delete(childId)) throw new Error('injected delivery failure')
       deliveries.push({ childId, content })
       const child = liveAgents.get(childId)
@@ -243,6 +244,7 @@ const ctx = {
 const agentTeamsRuntime = registerAgentTeamsTools(ctx, {
   stateDir: '.agent-teams',
   memberProvider: 'spawn',
+  fallback: { provider: 'backup', model: 'backup-model' },
   memberMaxDepth: 1,
   maxMembers: 8,
   profiles: {
@@ -790,6 +792,9 @@ try {
   const alpha = liveAgents.get(addedAlpha.member_id)
   const beta = liveAgents.get(addedBeta.member_id)
   const gamma = liveAgents.get(addedGamma.member_id)
+  check('manually added members persist the global fallback for later activations',
+    (await state())?.members.every(member => member.fallback?.provider === 'backup'
+      && member.fallback?.model === 'backup-model'))
   publishStatus(alpha, 'idle')
   publishStatus(beta, 'idle')
   publishStatus(gamma, 'idle')
@@ -799,6 +804,17 @@ try {
   check('idle assigned member is claimed and woken automatically',
     firstAttempt?.status === 'claimed' && firstAttempt.assignee === 'alpha'
       && deliveries.some(delivery => delivery.childId === alpha.id))
+  let captainClaimRejected = false
+  const beforeCaptainClaim = JSON.stringify(await task(t1.task_id))
+  const beforeCaptainClaimDeliveries = deliveries.length
+  try {
+    await call('agent_teams_claim_task', { task_id: t1.task_id, assignee: 'alpha' })
+  } catch (error) {
+    captainClaimRejected = /member|reassign_task/.test(String(error))
+  }
+  check('captain cannot mint a claim capability for a member; use reassign_task',
+    captainClaimRejected && JSON.stringify(await task(t1.task_id)) === beforeCaptainClaim
+      && deliveries.length === beforeCaptainClaimDeliveries)
   const alphaClaim = await call('agent_teams_claim_task', { task_id: t1.task_id }, alpha)
   check('member observes the scheduler attempt idempotently', alphaClaim.attempt_id === firstAttempt?.attemptId)
   await call('agent_teams_update_task', {
@@ -821,24 +837,120 @@ try {
   // must be idempotent until the captain performs an explicit reassignment.
   publishStatus(alpha, 'idle')
   await new Promise(resolve => setTimeout(resolve, 20))
-  // Normal continuable settlement disposes its live AgentHandle between
-  // turns. The process-local idle observation must still distinguish this
-  // parked attempt from a cold process restart.
-  liveAgents.delete(alpha.id)
+  // The idle member remains resident, so repeated status kicks must keep
+  // its current attempt parked rather than spuriously waking it again.
   const deliveriesBeforeParkedKicks = deliveries.length
+  const parkedAttemptBeforeRateLimitRecovery = await task(t1.task_id)
+  // Model the provider-facing failure boundary from #66: the member's turn
+  // has ended after a rate-limit response, but its durable task capability is
+  // still open. Repeated scheduler/status kicks must park that capability
+  // instead of minting a fresh attempt and inference request each time.
+  for (let kick = 0; kick < 20; kick += 1) {
+    await call('agent_teams_status', {})
+  }
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const parkedAlpha = await task(t1.task_id)
+  check('rate-limited idle owner does not enter an unbounded retry loop (#66)',
+    parkedAlpha?.status === 'in_progress'
+      && parkedAlpha.attempt === parkedAttemptBeforeRateLimitRecovery?.attempt
+      && parkedAlpha.attemptId === parkedAttemptBeforeRateLimitRecovery?.attemptId
+      && deliveries.length === deliveriesBeforeParkedKicks)
+  liveAgents.set(alpha.id, alpha)
+
+  // Harness normally disposes a continuable AgentHandle after settlement. The
+  // in-process idle observation remains authoritative, so a non-resident
+  // parked owner must not be mistaken for a cold restart on every status poll.
+  liveAgents.delete(alpha.id)
+  const deliveriesBeforeDisposedParkedKicks = deliveries.length
   await Promise.all([
     call('agent_teams_status', {}),
     call('agent_teams_status', {}),
     call('agent_teams_status', {}),
   ])
   await new Promise(resolve => setTimeout(resolve, 20))
-  const parkedAlpha = await task(t1.task_id)
-  check('resident idle owner keeps its open attempt across repeated scheduler kicks',
-    parkedAlpha?.status === 'in_progress'
-      && parkedAlpha.attempt === alphaClaim.attempt
-      && parkedAlpha.attemptId === alphaClaim.attempt_id
-      && deliveries.length === deliveriesBeforeParkedKicks)
+  const disposedParkedAlpha = await task(t1.task_id)
+  check('disposed settled owner keeps its parked attempt across repeated scheduler kicks',
+    disposedParkedAlpha?.status === 'in_progress'
+      && disposedParkedAlpha.attempt === alphaClaim.attempt
+      && disposedParkedAlpha.attemptId === alphaClaim.attempt_id
+      && deliveries.length === deliveriesBeforeDisposedParkedKicks)
   liveAgents.set(alpha.id, alpha)
+
+  // Unobserved recovery whose followup fails must restore the original open
+  // capability and consume that generation's budget. Later status kicks must
+  // not recast it into pending or a new attempt.
+  const tRecoverFail = await call('agent_teams_create_task', {
+    subject: 'unobserved recovery delivery failure', assignee: 'gamma',
+  })
+  const recoverFailDispatch = await task(tRecoverFail.task_id)
+  check('idle assigned gamma is claimed for the recovery-failure fixture',
+    recoverFailDispatch?.status === 'claimed' && recoverFailDispatch.assignee === 'gamma')
+  const recoverFailClaim = await call('agent_teams_claim_task', { task_id: tRecoverFail.task_id }, gamma)
+  await call('agent_teams_update_task', {
+    task_id: tRecoverFail.task_id, status: 'in_progress', attempt_id: recoverFailClaim.attempt_id,
+  }, gamma)
+  liveAgents.delete(gamma.id)
+  failNextDelivery.add(gamma.id)
+  const deliveriesBeforeFailedRecovery = deliveries.length
+  await call('agent_teams_status', {})
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const rolledBackRecovery = await task(tRecoverFail.task_id)
+  await Promise.all([
+    call('agent_teams_status', {}),
+    call('agent_teams_status', {}),
+    call('agent_teams_status', {}),
+  ])
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const throttledFailedRecovery = await task(tRecoverFail.task_id)
+  check('failed unobserved recovery restores the original capability and later kicks do not recast it',
+    rolledBackRecovery?.status === 'in_progress'
+      && rolledBackRecovery.assignee === 'gamma'
+      && rolledBackRecovery.attempt === recoverFailClaim.attempt
+      && rolledBackRecovery.attemptId === recoverFailClaim.attempt_id
+      && deliveries.length === deliveriesBeforeFailedRecovery
+      && throttledFailedRecovery?.status === 'in_progress'
+      && throttledFailedRecovery.attempt === recoverFailClaim.attempt
+      && throttledFailedRecovery.attemptId === recoverFailClaim.attempt_id
+      && deliveries.length === deliveriesBeforeFailedRecovery)
+  liveAgents.set(gamma.id, gamma)
+  const recoverFailComplete = await call('agent_teams_claim_task', { task_id: tRecoverFail.task_id }, gamma)
+  await call('agent_teams_update_task', {
+    task_id: tRecoverFail.task_id,
+    status: 'completed',
+    output: 'closed failed-recovery fixture',
+    attempt_id: recoverFailComplete.attempt_id,
+  }, gamma)
+  check('restored capability remains usable after a failed recovery delivery',
+    recoverFailComplete.attempt_id === recoverFailClaim.attempt_id
+      && (await task(tRecoverFail.task_id))?.status === 'completed')
+  publishStatus(gamma, 'idle')
+
+  // A durable task with no process-local idle observation is a cold/unobserved
+  // owner. It gets exactly one fresh capability, then the recovery marker is
+  // sticky even if the new AgentHandle is still absent on later status kicks.
+  liveAgents.delete(beta.id)
+  const deliveriesBeforeColdRecovery = deliveries.length
+  await call('agent_teams_status', {})
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const coldRecoveredBeta = await task(t2.task_id)
+  const deliveriesAfterColdRecovery = deliveries.length
+  await Promise.all([
+    call('agent_teams_status', {}),
+    call('agent_teams_status', {}),
+    call('agent_teams_status', {}),
+  ])
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const throttledRecoveredBeta = await task(t2.task_id)
+  check('unobserved missing owner recovers once and repeated kicks do not rotate it again',
+    coldRecoveredBeta?.status === 'claimed'
+      && coldRecoveredBeta.assignee === 'beta'
+      && coldRecoveredBeta.attempt === betaClaim.attempt + 1
+      && coldRecoveredBeta.attemptId !== betaClaim.attempt_id
+      && deliveriesAfterColdRecovery === deliveriesBeforeColdRecovery + 1
+      && throttledRecoveredBeta?.attempt === coldRecoveredBeta.attempt
+      && throttledRecoveredBeta?.attemptId === coldRecoveredBeta.attemptId
+      && deliveries.length === deliveriesAfterColdRecovery)
+  liveAgents.set(beta.id, beta)
 
   publishStatus(beta, 'idle')
   await new Promise(resolve => setTimeout(resolve, 20))
@@ -850,8 +962,8 @@ try {
   check('captain message resumes a parked owner without rotating its attempt',
     resumedBeta.delivered === 'wake'
       && deliveries.length === deliveriesBeforeResume + 1
-      && resumedBetaTask?.attempt === betaClaim.attempt
-      && resumedBetaTask.attemptId === betaClaim.attempt_id)
+      && resumedBetaTask?.attempt === coldRecoveredBeta?.attempt
+      && resumedBetaTask.attemptId === coldRecoveredBeta?.attemptId)
 
   let unsafeCaptainTakeoverRejected = false
   try {
@@ -867,10 +979,10 @@ try {
     task_id: t1.task_id, assignee: 'gamma', reason: 'alpha is stuck',
   })
   const reassigned = await task(t1.task_id)
-  check('reassignment quiesces old owner and creates a new attempt',
+  check('reassignment quiesces recovered owner and creates a new attempt',
     takeover.assignee === 'gamma' && reassigned?.status === 'claimed'
-      && reassigned.attemptId !== alphaClaim.attempt_id
-      && takeover.attempt === alphaClaim.attempt + 1)
+      && reassigned.attemptId !== disposedParkedAlpha?.attemptId
+      && takeover.attempt === (disposedParkedAlpha?.attempt ?? 0) + 1)
   let staleRejected = false
   try {
     await call('agent_teams_update_task', {
@@ -888,12 +1000,16 @@ try {
   await call('agent_teams_update_task', {
     task_id: t1.task_id, status: 'completed', output: 'gamma result', attempt_id: gammaClaim.attempt_id,
   }, gamma)
+  const recoveredBetaClaim = await call('agent_teams_claim_task', { task_id: t2.task_id }, beta)
   await call('agent_teams_update_task', {
-    task_id: t2.task_id, status: 'completed', output: 'beta result', attempt_id: betaClaim.attempt_id,
+    task_id: t2.task_id, status: 'in_progress', attempt_id: recoveredBetaClaim.attempt_id,
   }, beta)
-  check('resumed member completes with the original parked capability',
+  await call('agent_teams_update_task', {
+    task_id: t2.task_id, status: 'completed', output: 'beta result', attempt_id: recoveredBetaClaim.attempt_id,
+  }, beta)
+  check('resumed recovered member completes with its throttled capability',
     (await task(t2.task_id))?.status === 'completed'
-      && (await task(t2.task_id))?.attemptId === betaClaim.attempt_id)
+      && (await task(t2.task_id))?.attemptId === recoveredBetaClaim.attempt_id)
   publishStatus(beta, 'idle')
   publishStatus(gamma, 'idle')
   await new Promise(resolve => setTimeout(resolve, 20))

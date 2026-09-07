@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { apply as installRetry } from '@deepseek-ai/dsh-llm-retry'
+import { deliverSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { installMemberSelectionRuntime } from '../lib/members.js'
 import { installTeamScheduler } from '../lib/scheduler.js'
 import { appendMailbox, createMessage, createTeamDir, readTeam, readMailbox, readUnreadMailbox, withTeamLock, writeTeam } from '../lib/state.js'
@@ -79,7 +80,7 @@ async function fixture(t, { captainStatus = 'idle', fallback, captainOffline = f
       // alpha.5 split ctx.subagents.followup into the model-authored
       // sendMessage and the symbol-keyed host-protocol queue; deliverToMember
       // routes host deliveries through queueHostSubagentPrompt -> this symbol.
-      [Symbol.for('dsh.subagent.queuePrompt')](_captain, id, content) { deliveries.push({ id, content }); return Promise.resolve('accepted') },
+      [deliverSubagentPrompt](_captain, id, content) { deliveries.push({ id, content }); return Promise.resolve('accepted') },
     },
   }
   // alpha.4: the member runtime attaches per-child setup on agent/created, and
