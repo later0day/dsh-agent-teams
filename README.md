@@ -22,7 +22,7 @@
 
 `dsh-agent-teams` turns the current DeepSeek Harness session into a captain that can assemble durable sub-agents, split a goal into dependency-aware tasks, and coordinate work through direct messages.
 
-Ask in natural language. The plugin provides the team protocol, eleven coordination tools, persistent state, an automatic shared-task scheduler, and a live Web UI—without requiring a separate workflow engine.
+Ask in natural language. The plugin provides the team protocol, 13 coordination tools, persistent state, an automatic shared-task scheduler, and a live Web UI—without requiring a separate workflow engine.
 
 <p align="center">
   <img src="./assets/ui.png" width="100%" alt="DeepSeek Harness conversation with the AgentTeams live activity panel, members, tasks, dependencies, and reports">
@@ -30,7 +30,7 @@ Ask in natural language. The plugin provides the team protocol, eleven coordinat
 
 ## Releases
 
-[v0.1.16-rc.1](./release-notes/v0.1.16-rc.1.md) is published on npm `next`, with fixes for startup, member messaging and task collaboration across supported Harness RC / Alpha versions. Choose a version pair below.
+[v0.1.16-rc.3](./release-notes/v0.1.16-rc.3.md) is published on npm `next`, with a concise fixed team protocol, existing-team reuse guidance, Web approval wakeups, and team-lock cleanup. See the [release verification](./docs/releases/v0.1.16-rc.3/README.md) and choose a version pair below.
 
 ## Why AgentTeams?
 
@@ -49,13 +49,13 @@ The conversation card and activity panel use Harness's official locale service. 
 
 ## Install and choose versions
 
-**Recommended pair: DeepSeek Harness `0.1.2-rc.1` + AgentTeams `0.1.16-rc.1`. Both are still prereleases.**
+**Recommended pair: DeepSeek Harness `0.1.2-rc.1` + AgentTeams `0.1.16-rc.3`. Both are still prereleases.**
 
 | Use case | DeepSeek Harness | AgentTeams plugin |
 | --- | --- | --- |
-| **Recommended installation** | **`0.1.2-rc.1`** | **`0.1.16-rc.1`** |
-| Developer Alpha testing | `0.1.2-alpha.5` | `0.1.16-rc.1` |
-| Retaining an older Alpha | `0.1.2-alpha.2` | `0.1.16-rc.1` |
+| **Recommended installation** | **`0.1.2-rc.1`** | **`0.1.16-rc.3`** |
+| Developer Alpha testing | `0.1.2-alpha.5` | `0.1.16-rc.3` |
+| Retaining an older Alpha | `0.1.2-alpha.2` | `0.1.16-rc.3` |
 
 ### 1. Install DeepSeek Harness
 
@@ -71,12 +71,12 @@ Skip this if you already run this version. Alpha is opt-in: select an exact Alph
 This installs into the `web` profile. Replace `web` with your actual profile name if different:
 
 ```sh
-dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.16-rc.1
+dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.16-rc.3
 ```
 
 **After installation, stop and restart Harness for that profile, then refresh the browser.**
 
-The fixed plugin `0.1.16-rc.1` is published on `next`; `latest` still points to `0.1.15`, which targets Alpha.2. Use the exact-version command above. Future plugin prereleases use `next`; only stable plugin releases that pass the full verification matrix may use `latest`.
+Plugin `0.1.16-rc.3` uses the `next` channel; `latest` still points to `0.1.15`, which targets Alpha.2. Use the exact-version command above. Future plugin prereleases use `next`; only stable plugin releases that pass the full verification matrix may use `latest`.
 
 > Desktop users must check the app's embedded Harness core; upgrading the global CLI does not upgrade it. For older `0.1.0-*` / `0.1.1-*` or unlisted hosts, keep a working pair and follow the [older-version and diagnostic guide](./docs/maintenance-workflow.md).
 
@@ -88,7 +88,7 @@ Then ask for a team directly:
 
 ## How it works
 
-1. The current session creates a team and becomes its captain.
+1. For a request to use AgentTeams, the captain follows the core protocol already in its system instructions. It continues an existing team and uses `agent_teams_status` when current state needs checking. When no team exists, the goal becomes a staged plan for review.
 2. The captain adds role-specific members backed by continuable sub-agents.
 3. The goal becomes tasks with owners and explicit dependencies.
 4. The shared scheduler uses real `running / idle / ready` state to atomically claim one ready task per idle member and wake it. An interrupted resident attempt stays parked and can resume through a direct message without losing its capability; after a cold process restart, the scheduler retries stranded open work with a fresh attempt.
@@ -98,6 +98,8 @@ Then ask for a team directly:
 Team state is stored under `<workspace>/.agent-teams/`; the Web panel reads that disk truth and combines it with live sub-agent activity.
 
 Member creation is zero-interaction by default: a member on the captain's current LLM route snapshots that provider, model, and reasoning effort, while a member on a requested alternative route snapshots the target model's default effort; later continuations restore the resolved snapshot. Only an explicit heterogeneous-team request (for example, “backend on provider A/model X, frontend on provider B/model Y”) supplies a member-specific `provider` + `model`; there is no per-member model or reasoning prompt.
+
+Captain sessions keep the concise core protocol and the original 13 native team tools from their first request. All business tools are directly available; no loading tool or extra activation call is needed. Configured profiles retain their bounded directory in the fixed system prompt. Creating, approving, continuing or ending a team does not rewrite the system prompt or tool schemas. Core rules remain available after history compaction or discarded code-mode tool results. Members receive four team tools, fixed member instructions, and their ordinary coding/research tools. Web approval wakes the captain with a control message; later member reports wake it again. See the [fixed protocol and benchmark contract](./docs/progressive-loading.md).
 
 ## Slash command
 
@@ -113,7 +115,7 @@ command), describe the goal, and press Enter.
 The command pipeline claims the line, then preserves that exact input as an
 ordinary user follow-up so it remains visible in the main chat. The gesture
 boundary adds the deterministic activation directive at pre-step, so the
-captain protocol still starts immediately. The invocation is also durably
+first model request follows the staged planning protocol without a mandatory helper call. The invocation is also durably
 logged (`command/run` / `command/done`).
 
 Surfaces without command adjudication (for example the headless CLI) get the
