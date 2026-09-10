@@ -12,11 +12,14 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LlmError } from '@deepseek-ai/dsh-llm'
-import { deliverSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { haltTeamWork, registerAgentTeamsTools } from '../lib/tools.js'
 import { buildActivationDirective, invokedAgentTeamsGoal, invokedAgentTeamsInvocation, installAgentTeamsGestureBoundary, profileCommandName, registerAgentTeamsCommand } from '../lib/command.js'
 import { readArchivedTeam, readMailbox, readTeam, readUnreadMailbox } from '../lib/state.js'
 import { collectArchivedTeamsActivity } from '../lib/snapshot.js'
+
+const deliveryHarness = process.argv.includes('--delivery-harness')
+const modernHarness = deliveryHarness || process.argv.includes('--modern-harness')
+const hostQueue = Symbol.for(deliveryHarness ? 'dsh.subagent.deliverPrompt' : 'dsh.subagent.queuePrompt')
 
 const workspace = await mkdtemp(join(tmpdir(), 'dsh-agent-teams-lifecycle-'))
 const definitions = new Map()
@@ -25,6 +28,7 @@ const children = []
 const deliveries = []
 const listeners = new Map()
 const childListeners = new Map()
+const continuableSetups = []
 const failNextDelivery = new Set()
 const failures = []
 let childSeq = 0
@@ -38,11 +42,9 @@ function check(label, condition, detail = '') {
 }
 
 function session(parentSession) {
-  const events = []
   return {
-    header: { cwd: workspace, parentSession },
-    ownEvents: () => events,
-    seedEvents(next) { events.length = 0; events.push(...next) },
+    header: { cwd: workspace, parentSession, ...(modernHarness ? {} : { seedLength: 0 }) },
+    ...(modernHarness ? { ownEvents() { return this._ownEvents ?? [] } } : { events: [] }),
     append() {},
     requestHeader() {
       return { config: { provider: 'fake', model: 'fake-model', reasoningEffort: 'high' } }
@@ -51,25 +53,11 @@ function session(parentSession) {
 }
 
 function makeAgent(id, parentSession) {
-  // The plugin installs its per-child listeners through agent.ctx (alpha.4
-  // replaced ctx.subagents.registerContinuableSetup with agent/created +
-  // agent.ctx). Record them in a per-child registry so this harness can
-  // dispatch model selection and the agent/request-error bridge to one child.
-  const registry = new Map()
-  childListeners.set(id, registry)
   return {
     id,
     status: 'idle',
     options: { provider: 'fake', model: 'fake-model' },
     session: session(parentSession),
-    ctx: {
-      on(name, listener) {
-        const current = registry.get(name) ?? []
-        current.push(listener)
-        registry.set(name, current)
-        return () => registry.set(name, (registry.get(name) ?? []).filter(candidate => candidate !== listener))
-      },
-    },
     followups: [],
     steers: [],
     injections: [],
@@ -97,6 +85,26 @@ function publishStatus(subject, status) {
     subject._idle = undefined
   }
   for (const listener of listeners.get('agent/status') ?? []) listener({ agent: subject, status })
+}
+
+/**
+ * Compose one child's scoped context like the harness does, so the plugin's
+ * continuable setup can install its per-child listeners (model selection and
+ * the `agent/request-error` bridge) against a dispatchable registry.
+ */
+function childContext(child) {
+  const registry = new Map()
+  childListeners.set(child.id, registry)
+  return {
+    agent: child,
+    effect(setup) { return setup() },
+    on(name, listener) {
+      const current = registry.get(name) ?? []
+      current.push(listener)
+      registry.set(name, current)
+      return () => registry.set(name, (registry.get(name) ?? []).filter(candidate => candidate !== listener))
+    },
+  }
 }
 
 /** Dispatch one failed model request to a child's request-error listeners. */
@@ -151,9 +159,6 @@ const ctx = {
     get(id) {
       return liveAgents.get(id)
     },
-    list() {
-      return [...liveAgents.values()]
-    },
   },
   llm: {
     async resolveCallConfig(config) {
@@ -164,6 +169,10 @@ const ctx = {
     },
   },
   subagents: {
+    registerContinuableSetup(setup) {
+      continuableSetups.push(setup)
+      return () => {}
+    },
     getProvider(name) {
       if (name !== 'spawn') return undefined
       return { prepareContinuable() {}, capabilities: { persona: true, toolFilter: true } }
@@ -178,7 +187,7 @@ const ctx = {
       liveAgents.set(id, child)
       children.push({ id, label: spec.label, mode: 'continuable' })
       if (typeof spec.label === 'string' && spec.label.startsWith('agent-teams:')) {
-        child.session.seedEvents([{
+        child.session[modernHarness ? '_ownEvents' : 'events'] = [{
           type: 'subagent/descriptor',
           data: {
             version: 3,
@@ -188,9 +197,15 @@ const ctx = {
             agentProvider: spec.request?.agentOptions?.provider ?? 'fake',
             agentModel: spec.request?.agentOptions?.model ?? 'fake-model',
           },
-        }])
+        }]
       }
-      for (const listener of listeners.get('agent/created') ?? []) listener({ agent: child })
+      child.ctx = childContext(child)
+      if (deliveryHarness) delete child.ctx.agent
+      if (modernHarness) {
+        for (const listener of listeners.get('agent/session-start') ?? []) listener({ agent: child, source: 'startup' })
+      } else {
+        for (const setup of continuableSetups) setup(child.ctx)
+      }
       return { childId: id, messageId: `welcome-${childSeq}` }
     },
     async listChildren(parentId) {
@@ -205,21 +220,14 @@ const ctx = {
     async listDescendants(parentId) {
       return this.listChildren(parentId)
     },
-    [deliverSubagentPrompt](_parent, childId, content) {
+    async followup(_parent, childId, content) {
+      if (this !== ctx.subagents) throw new Error('native receiver was lost')
       if (failNextDelivery.delete(childId)) throw new Error('injected delivery failure')
       if (deliveryDelayMs > 0) await new Promise(resolve => setTimeout(resolve, deliveryDelayMs))
       deliveries.push({ childId, content })
       const child = liveAgents.get(childId)
       if (child) child.status = 'running'
-      return Promise.resolve(`message-${++messageSeq}`)
-    },
-    // alpha.5 model-authored delivery path; the retirement guard wraps it too.
-    sendMessage(_sender, childId, content) {
-      if (failNextDelivery.delete(childId)) throw new Error('injected delivery failure')
-      deliveries.push({ childId, content })
-      const child = liveAgents.get(childId)
-      if (child) child.status = 'running'
-      return Promise.resolve(`message-${++messageSeq}`)
+      return `message-${++messageSeq}`
     },
     interrupt(childId) {
       const child = liveAgents.get(childId)
@@ -241,6 +249,25 @@ const ctx = {
     },
   },
   logger: { debug() {}, warn() {} },
+}
+
+// Model modern host delivery as a distinct FIFO entry. Deliberately reject
+// public sendMessage: using steer for team jobs must make this suite fail.
+if (modernHarness) {
+  const followup = ctx.subagents.followup
+  delete ctx.subagents.followup
+  delete ctx.subagents.registerContinuableSetup
+  ctx.subagents[hostQueue] = function (parent, childId, content, source, signal, delivery) {
+    if (deliveryHarness && delivery !== 'queue') throw new Error('team tasks must queue a distinct turn')
+    return followup.call(this, parent, childId, content, { source, signal })
+  }
+  ctx.subagents.sendMessage = async function () { throw new Error('team jobs must use FIFO, not steer') }
+}
+
+function directPrompt(parent, childId, content, options) {
+  return modernHarness
+    ? ctx.subagents[hostQueue](parent, childId, content, options.source, options.signal, ...(deliveryHarness ? ['queue'] : []))
+    : ctx.subagents.followup(parent, childId, content, options)
 }
 
 const agentTeamsRuntime = registerAgentTeamsTools(ctx, {
@@ -1075,13 +1102,13 @@ try {
   let removedFollowupRejected = false
   const deliveriesBeforeRemovedFollowup = deliveries.length
   try {
-    await ctx.subagents.sendMessage(captain, alpha.id, [{ type: 'text', text: 'must not resume' }], {
-      signal: new AbortController().signal,
+    await directPrompt(captain, alpha.id, [{ type: 'text', text: 'must not resume' }], {
+      source: { kind: 'plugin', plugin: 'verification' }, signal: new AbortController().signal,
     })
   } catch (error) {
     removedFollowupRejected = error?.code === 'NOT_RESUMABLE'
   }
-  check('removing a member blocks direct resume before delivery',
+  check('removing a member blocks direct followup before resume',
     removedFollowupRejected && deliveries.length === deliveriesBeforeRemovedFollowup)
   let removedRejected = false
   try {
@@ -1275,8 +1302,8 @@ try {
   let coldFollowupRejected = false
   const deliveriesBeforeColdFollowup = deliveries.length
   try {
-    await ctx.subagents.sendMessage(captain, gamma.id, [{ type: 'text', text: 'must stay retired' }], {
-      signal: new AbortController().signal,
+    await directPrompt(captain, gamma.id, [{ type: 'text', text: 'must stay retired' }], {
+      source: { kind: 'plugin', plugin: 'verification' }, signal: new AbortController().signal,
     })
   } catch (error) {
     coldFollowupRejected = error?.code === 'NOT_RESUMABLE'
@@ -1286,12 +1313,12 @@ try {
   check('team shutdown leaves unrelated continuable subagents untouched',
     (await ctx.subagents.listChildren(captain.id))
       .some(child => child.id === 'foreign-session' && child.mode === 'continuable'))
-  const foreignFollowup = await ctx.subagents.sendMessage(captain, 'foreign-session', [
+  const foreignFollowup = await directPrompt(captain, 'foreign-session', [
     { type: 'text', text: 'unrelated work still routes' },
   ], {
-    signal: new AbortController().signal,
+    source: { kind: 'plugin', plugin: 'verification' }, signal: new AbortController().signal,
   })
-  check('team shutdown leaves unrelated continuable delivery untouched',
+  check('team shutdown leaves unrelated continuable followup untouched',
     typeof foreignFollowup === 'string'
       && deliveries.some(delivery => delivery.childId === 'foreign-session'))
 

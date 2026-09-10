@@ -1222,6 +1222,27 @@ check(
   'pre-rc.8 member navigation keeps the ordinary session fallback',
   legacyNavigation === 'session' && legacyNavigationCalls[0] === 'member-session',
 )
+const panelNavigationCalls = []
+await openAgentTeamMember({
+  open() { throw new Error('expected addressed navigation') },
+  refreshSubagents: async () => {},
+  openSubagent: () => panelNavigationCalls.push('member'),
+}, 'captain-session', 'member-session', {
+  beginNavigation: () => new AbortController().signal,
+  selectPanel: id => panelNavigationCalls.push(id),
+})
+check('0.1.5 member navigation selects the Conversation after opening its transcript',
+  JSON.stringify(panelNavigationCalls) === JSON.stringify(['member', null]))
+const supersededNavigation = new AbortController()
+const cancelledNavigation = await openAgentTeamMember({
+  open() { throw new Error('cancelled navigation must not open a Session') },
+  refreshSubagents: async () => { supersededNavigation.abort() },
+  openSubagent() { throw new Error('cancelled refresh must not steal the current Session') },
+}, 'captain-session', 'member-session', {
+  beginNavigation: () => supersededNavigation.signal,
+  selectPanel() { throw new Error('cancelled navigation must not change main panel') },
+})
+check('0.1.5 superseded catalog refresh cannot steal navigation', cancelledNavigation === 'cancelled')
 check(
   'agent team cards derive a stable id from the standard create tool call',
   JSON.stringify(parseAgentTeamsCreateArgs('{"name":" Repo Review 2W! "}'))
@@ -1440,23 +1461,20 @@ function descriptorEvent(label, agentProvider = 'descriptor-provider', agentMode
   }
 }
 
-function fakeChildAgent({ id, label, parentSessionId, cwd, agentProvider, agentModel }) {
+function fakeChildContext({ label, parentSessionId, cwd, agentProvider, agentModel }) {
   const listeners = new Map()
   return {
     listeners,
-    agent: {
-      id,
-      status: 'idle',
-      whenIdle: async () => undefined,
-      session: {
-        header: { parentSession: parentSessionId, cwd },
-        ownEvents: () => [descriptorEvent(label, agentProvider, agentModel)],
-      },
-      ctx: {
-        on(name, listener) {
-          listeners.set(name, listener)
-          return () => listeners.delete(name)
+    context: {
+      agent: {
+        session: {
+          header: { parentSession: parentSessionId, cwd, seedLength: 0 },
+          events: [descriptorEvent(label, agentProvider, agentModel)],
         },
+      },
+      on(name, listener) {
+        listeners.set(name, listener)
+        return () => listeners.delete(name)
       },
     },
   }
@@ -1473,28 +1491,16 @@ async function routedConfig(child) {
   }))
 }
 
-// alpha.4 root-context fake: the member runtime now attaches its per-child setup
-// through the agent/created lifecycle event on the plugin context, not the
-// removed ctx.subagents.registerContinuableSetup hook.
-let onAgentCreated
+let setupMemberSelection
 const selectionRuntime = installMemberSelectionRuntime({
-  agents: { list: () => [] },
-  on(name, listener) {
-    if (name === 'agent/created') onAgentCreated = listener
-    return () => undefined
+  subagents: {
+    registerContinuableSetup: (setup) => {
+      setupMemberSelection = setup
+      return () => undefined
+    },
   },
-  effect: () => () => undefined,
-  logger: { warn: () => undefined },
 }, '.agent-teams')
-const setupMemberSelection = (child) => {
-  onAgentCreated({ agent: child.agent })
-  return () => {
-    for (const dispose of child.listeners.values()) void dispose
-    child.listeners.clear()
-  }
-}
-const freshChild = fakeChildAgent({
-  id: 'fresh-member',
+const freshChild = fakeChildContext({
   label: 'agent-teams:fresh-team:backend',
   parentSessionId: 'captain-session',
   cwd: process.cwd(),
@@ -1505,7 +1511,7 @@ await selectionRuntime.withPending(
   'agent-teams:fresh-team:backend',
   overriddenSelection,
   async () => {
-    disposeFresh = setupMemberSelection(freshChild)
+    disposeFresh = setupMemberSelection(freshChild.context)
   },
 )
 const freshRoute = await routedConfig(freshChild)
@@ -1537,15 +1543,14 @@ try {
     tasks: [],
     taskSeq: 0,
   })
-  const coldChild = fakeChildAgent({
-    id: 'cold-member',
+  const coldChild = fakeChildContext({
     label: 'agent-teams:restore-team:reviewer',
     parentSessionId: 'captain-session',
     cwd: restoreWorkspace,
     agentProvider: 'cold-provider',
     agentModel: 'cold-model',
   })
-  const disposeCold = setupMemberSelection(coldChild)
+  const disposeCold = setupMemberSelection(coldChild.context)
   const coldRoute = await routedConfig(coldChild)
   check(
     'cold-resumed child restores provider, model, and reasoning from team.json',

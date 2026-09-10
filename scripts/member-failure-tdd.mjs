@@ -7,10 +7,13 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { apply as installRetry } from '@deepseek-ai/dsh-llm-retry'
-import { deliverSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { installMemberSelectionRuntime } from '../lib/members.js'
 import { installTeamScheduler } from '../lib/scheduler.js'
 import { appendMailbox, createMessage, createTeamDir, readTeam, readMailbox, readUnreadMailbox, withTeamLock, writeTeam } from '../lib/state.js'
+
+const deliveryHarness = process.argv.includes('--delivery-harness')
+const modernHarness = deliveryHarness || process.argv.includes('--modern-harness')
+const hostQueue = Symbol.for(deliveryHarness ? 'dsh.subagent.deliverPrompt' : 'dsh.subagent.queuePrompt')
 
 async function eventually(predicate) {
   for (let i = 0; i < 100; i++) {
@@ -49,8 +52,8 @@ async function fixture(t, { captainStatus = 'idle', fallback, captainOffline = f
     id: 'worker-session', status: 'running',
     whenIdle: () => child.status === 'idle' ? Promise.resolve() : idle,
     session: {
-      header: { cwd: workspace, parentSession: captain.id },
-      ownEvents: () => [{ type: 'subagent/descriptor', data: {
+      header: { cwd: workspace, parentSession: captain.id, seedLength: 0 },
+      events: [{ type: 'subagent/descriptor', data: {
         version: 3, mode: 'continuable', provider: 'spawn', label: 'agent-teams:team:worker',
         agentProvider: 'fake', agentModel: 'primary',
       } }],
@@ -63,38 +66,49 @@ async function fixture(t, { captainStatus = 'idle', fallback, captainOffline = f
     tasks: [{ id: 't1', subject: 'work', assignee: 'worker', status: 'in_progress', dependencies: [], attempt: 1, attemptId: 'a1', createdAt: 1, updatedAt: 1 }],
   })
   let setup
-  let teardown
+  const rootListeners = new Map()
+  const disposers = []
   const ctx = {
     logger: { debug() {}, warn(message) { warnings.push(message) } },
-    agents: {
-      get(id) { return id === child.id ? child : id === captain.id && !captainOffline ? captain : undefined },
-      list() { return [] },
-    },
-    on(name, listener) {
-      if (name === 'agent/created') setup = listener
-      if (name === 'agent/disposed') teardown = listener
-      return () => {}
-    },
-    effect() { return () => {} },
+    agents: { get(id) { return id === child.id ? child : id === captain.id && !captainOffline ? captain : undefined } },
+    on(name, listener) { rootListeners.set(name, listener); return () => rootListeners.delete(name) },
+    effect(setup) { const dispose = setup(); disposers.push(dispose); return dispose },
     subagents: {
-      // alpha.5 split ctx.subagents.followup into the model-authored
-      // sendMessage and the symbol-keyed host-protocol queue; deliverToMember
-      // routes host deliveries through queueHostSubagentPrompt -> this symbol.
-      [deliverSubagentPrompt](_captain, id, content) { deliveries.push({ id, content }); return Promise.resolve('accepted') },
+      registerContinuableSetup(fn) { setup = fn },
+      async followup(_captain, id, content) { deliveries.push({ id, content }); return 'accepted' },
     },
   }
-  // alpha.4: the member runtime attaches per-child setup on agent/created, and
-  // reads the child scope from agent.ctx (the removed registerContinuableSetup
-  // used to hand the plugin that child context directly). Per-child teardown
-  // now fires through agent/disposed.
-  child.ctx = { on(name, listener) { listeners.set(name, listener); return () => listeners.delete(name) } }
+  if (modernHarness) {
+    const oldEvents = child.session.events
+    delete child.session.events
+    delete child.session.header.seedLength
+    child.session.ownEvents = () => oldEvents
+    const followup = ctx.subagents.followup
+    delete ctx.subagents.followup
+    delete ctx.subagents.registerContinuableSetup
+    ctx.subagents[hostQueue] = function (parent, id, content, source, signal, delivery) {
+      if (deliveryHarness && delivery !== 'queue') throw new Error('recovery must queue a distinct turn')
+      return followup.call(this, parent, id, content, { source, signal })
+    }
+    ctx.subagents.sendMessage = () => { throw new Error('failure recovery must not steer a job') }
+    setup = childCtx => {
+      child.ctx = childCtx
+      if (deliveryHarness) delete childCtx.agent
+      rootListeners.get('agent/session-start')({ agent: child, source: 'startup' })
+      return () => { for (const dispose of disposers) dispose() }
+    }
+  }
   const scheduler = installTeamScheduler(ctx, { stateDir: '.agent-teams' })
   const runtime = installMemberSelectionRuntime(ctx, '.agent-teams', (workspace, teamId, memberName) => (
     scheduler.kickMember(workspace, teamId, memberName)
   ))
   const dispose = await runtime.withPending(captain.id, 'agent-teams:team:worker', {
     provider: 'fake', model: 'primary', ...fallback ? { fallback } : {},
-  }, () => { setup({ agent: child }); return () => teardown?.({ agent: child }) })
+  }, () => setup({
+    agent: child,
+    effect(setup) { const dispose = setup(); disposers.push(dispose); return dispose },
+    on(name, listener) { listeners.set(name, listener); return () => listeners.delete(name) },
+  }))
   t.after(dispose)
   let retryHandler
   let projection

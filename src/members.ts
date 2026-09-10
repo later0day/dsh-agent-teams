@@ -4,7 +4,7 @@
  *
  * Members are durable continuable subagents of the captain, so a member keeps
  * its conversation across turns and across harness restarts: the captain
- * wakes it with {@link ctx.subagents.sendMessage}, it works through its turn
+ * queues its next turn through {@link deliverToMember}, it works through its turn
  * (updating team state through the `agent_teams_*` tools), and becomes idle
  * again. Its final assistant message is not readable programmatically, so the
  * member persists its report into the captain's mailbox and the task records,
@@ -15,14 +15,13 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent'
 // Declaration merge only: makes ctx.subagents visible.
-import { foldSubagentDescriptor, SubagentError } from '@deepseek-ai/dsh-subagent'
-import { type HostPromptDeliverer, deliverSubagentPrompt, queueHostSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
+import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { createUserMessage, LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
+import { guardSubagentDelivery, installContinuableMemberSetup, queueMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
 import { acknowledgeMailbox, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
-import { sessionOwnEvents } from './harness-compat.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
 import { CAPTAIN_TOOL_NAMES } from './tool-names.ts'
 
@@ -362,16 +361,8 @@ export function installMemberSelectionRuntime(
   onFailureSettled?: (workspace: string, teamId: string, memberName: string) => Promise<void>,
 ): MemberSelectionRuntime {
   const pending = new Map<string, MemberLlmSelection>()
-  const installed = new Map<Agent, () => void>()
-  // Harness alpha.4 removed ctx.subagents.registerContinuableSetup. Its per-child
-  // extension point is now agent/created: the published payload is the fresh or
-  // cold-resumed child Agent, and agent.ctx is its agent-local scope (unwinding
-  // on the child's disposal) — the exact scope the removed setup callback
-  // received. Mirrors the harness's own experimental/tool-agent-team migration.
-  const setupMember = (child: Agent): (() => void) => {
-    const childCtx = child.ctx
-    const suffix = child.session.ownEvents()
-    const descriptor = foldSubagentDescriptor(suffix)
+  installContinuableMemberSetup(ctx, (childCtx, child) => {
+    const descriptor = foldSubagentDescriptor(sessionOwnEvents(child.session))
     if (descriptor?.mode !== 'continuable' || !descriptor.label.startsWith(MEMBER_LABEL_PREFIX)) {
       return () => undefined
     }
@@ -472,24 +463,7 @@ export function installMemberSelectionRuntime(
       disposeSelection()
       disposeFailure()
     }
-  }
-
-  const maybeSetup = (child: Agent): void => {
-    if (installed.has(child)) return
-    installed.set(child, setupMember(child))
-  }
-  // A cold resume can republish a member before this runtime mounts; sweep the
-  // live registry once, then follow subsequent creations.
-  for (const agent of ctx.agents.list()) maybeSetup(agent)
-  ctx.on('agent/created', ({ agent }) => { maybeSetup(agent) })
-  ctx.on('agent/disposed', ({ agent }) => {
-    installed.get(agent)?.()
-    installed.delete(agent)
   })
-  ctx.effect(() => () => {
-    for (const dispose of installed.values()) dispose()
-    installed.clear()
-  }, 'agent-teams.memberSelectionRuntime()')
 
   return {
     isPendingMember(agent) {
@@ -686,10 +660,10 @@ export async function deliverToMember(
   signal: AbortSignal,
 ): Promise<boolean> {
   try {
-    await queueHostSubagentPrompt(ctx.subagents, captain, brandedSessionId(childId), [{ type: 'text', text }], { kind: 'plugin', plugin: 'dsh-agent-teams' }, signal)
+    await queueMemberPrompt(ctx.subagents, captain, brandedSessionId(childId), [{ type: 'text', text }], signal)
     return true
   } catch (error: unknown) {
-    ctx.logger.warn(`agent-teams: message delivery to member ${childId} failed: ${String(error)}`)
+    ctx.logger.warn(`agent-teams: prompt delivery to member ${childId} failed: ${String(error)}`)
     return false
   }
 }
@@ -710,59 +684,22 @@ export function interruptMember(ctx: Context, captain: Agent, childId: string): 
 }
 
 /**
- * Install the missing per-child retirement boundary.
+ * Install the missing per-child retirement boundary above Harness rc.6.
  *
  * Upstream `interrupt()` deliberately preserves continuable sessions and the
  * upstream seam exposes no targeted forget/retire method. The durable
- * AgentTeams index therefore rejects a retired member before it can
- * cold-resume. Harness alpha.5 split the single `followup` entry into two
- * cold-resume paths — the model-authored `sendMessage` and the symbol-keyed
- * host-protocol queue (`queueHostSubagentPrompt`) — so the boundary wraps
- * both. Harness 0.1.3-alpha.1 then unified `queueHostSubagentPrompt` and
- * `steerHostSubagentPrompt` onto one symbol-keyed method
- * (`deliverSubagentPrompt`, mode `'queue' | 'steer'`), retiring the old
- * queue-only symbol — the wrap below follows that symbol and forwards the
- * mode through untouched, so both delivery paths still land on the guard.
- * Catalog rows deliberately remain discoverable: Harness uses the direct-child
- * catalog to authorize historical transcript reads and `openSubagent()`, so
- * filtering those rows would make an archived member's persisted conversation
- * inaccessible. Exact ids keep unrelated subagents untouched while the resume
- * boundary still prevents further model turns.
+ * AgentTeams index therefore rejects every inbox delivery before it can cold-resume a
+ * retired member. Catalog rows deliberately remain discoverable: Harness rc.8
+ * uses the direct-child catalog to authorize historical transcript reads and
+ * `openSubagent()`, so filtering those rows would make an archived member's
+ * persisted conversation inaccessible. Exact ids keep unrelated subagents
+ * untouched while the delivery boundary still prevents further model turns.
  */
 export function installRetiredMemberGuard(ctx: Context, stateDir: string): void {
-  const runtime = ctx.subagents
-  ctx.effect(() => {
-    const rejectIfRetired = async (parent: Agent, targetId: SessionId): Promise<void> => {
-      const retired = await readRetiredMemberIds(join(parent.session.header.cwd ?? process.cwd(), stateDir))
-      if (retired.has(targetId)) {
-        throw new SubagentError(
-          `AgentTeams member "${targetId}" was retired and cannot be resumed`,
-          'NOT_RESUMABLE',
-        )
-      }
-    }
-
-    const sendMessage = runtime.sendMessage.bind(runtime)
-    const guardedSendMessage: typeof runtime.sendMessage = async (sender, targetId, content, options) => {
-      await rejectIfRetired(sender, targetId)
-      return sendMessage(sender, targetId, content, options)
-    }
-
-    type DeliverFace = { [deliverSubagentPrompt]: HostPromptDeliverer[typeof deliverSubagentPrompt] }
-    const queueHost = runtime as unknown as DeliverFace
-    const deliverPrompt = queueHost[deliverSubagentPrompt].bind(runtime)
-    const guardedDeliverPrompt: DeliverFace[typeof deliverSubagentPrompt] = async (parent, childId, content, source, signal, delivery) => {
-      await rejectIfRetired(parent, childId)
-      return deliverPrompt(parent, childId, content, source, signal, delivery)
-    }
-
-    runtime.sendMessage = guardedSendMessage
-    queueHost[deliverSubagentPrompt] = guardedDeliverPrompt
-    return () => {
-      if (runtime.sendMessage === guardedSendMessage) runtime.sendMessage = sendMessage
-      if (queueHost[deliverSubagentPrompt] === guardedDeliverPrompt) queueHost[deliverSubagentPrompt] = deliverPrompt
-    }
-  }, 'agent-teams: retired member guard')
+  guardSubagentDelivery(ctx, async (parent, childId) => {
+    const retired = await readRetiredMemberIds(join(parent.session.header.cwd ?? process.cwd(), stateDir))
+    return retired.has(childId)
+  })
 }
 
 /**
