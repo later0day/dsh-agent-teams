@@ -19,18 +19,14 @@ import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { createUserMessage, LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
-import { guardSubagentDelivery, installContinuableMemberSetup, queueMemberPrompt, steerMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
+import { guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, steerMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
 import { markMailboxDelivered, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { mailboxPrompt } from './mailbox.ts'
 import { appendTeamEvent, captainSessionOf } from './events.ts'
 import { TERMINAL_TASK_STATUSES, type TeamMember, type TeamState, type TeamTask } from './types.ts'
-import { CAPTAIN_TOOL_NAMES } from './tool-names.ts'
 
 /** Persona snapshot of a profile protocol; the full text lives on team.json. */
 export const PERSONA_PROTOCOL_MAX_CHARS = 400
-
-/** Captain-only AgentTeams tools hidden from newly spawned members. */
-const MEMBER_DENIED_TOOLS = CAPTAIN_TOOL_NAMES
 
 /**
  * Restore the SessionId brand on a value that round-tripped through the
@@ -635,7 +631,11 @@ export async function spawnMember(
         prompt: [{ type: 'text', text: initialPrompt ?? memberWelcome(team, member.name) }],
         parent: captain,
         persona: memberPersona(team, member, stateDir, config.executionPrompt),
-        toolFilter: { deny: [...MEMBER_DENIED_TOOLS, ...(config.maxDepth === 0 ? ['subagent', 'send_message'] : [])] },
+        // Depth deny entries name host tools; resolve them against the
+        // running host's registry so a renamed delegation tool cannot abort
+        // the spawn (see memberToolFilter). Depth is still enforced by the
+        // parent-chain guard installed at plugin mount.
+        toolFilter: memberToolFilter(config.maxDepth, restrictableToolNames(captain)),
         agentOptions: {
           provider: llmSelection.provider,
           model: llmSelection.model,
