@@ -22,7 +22,7 @@
 
 `dsh-agent-teams` turns the current DeepSeek Harness session into a captain that can assemble durable sub-agents, split a goal into dependency-aware tasks, and coordinate work through direct messages.
 
-Ask in natural language. The plugin provides the team protocol, 13 coordination tools, persistent state, an automatic shared-task scheduler, and a live Web UI—without requiring a separate workflow engine.
+Ask in natural language. The plugin provides the team protocol, 14 coordination tools, persistent state, an automatic shared-task scheduler, and a live Web UI—without requiring a separate workflow engine.
 
 <p align="center">
   <img src="./assets/ui.png" width="100%" alt="DeepSeek Harness conversation with the AgentTeams live activity panel, members, tasks, dependencies, and reports">
@@ -30,7 +30,7 @@ Ask in natural language. The plugin provides the team protocol, 13 coordination 
 
 ## Releases
 
-[v0.1.17](./release-notes/v0.1.17.md) adds automatic light, dark, and system theme support on the npm `latest` channel. Activity panels, conversation cards, and dialog controls follow Harness semantic colors. Recommended host: DeepSeek Harness `0.1.5-rc.1`; the three older supported host targets are retained.
+[v0.1.20](./release-notes/v0.1.20.md) syncs the version references in this document with the npm `latest` channel. It changes no code and no behavior; the packaged artifact is identical to [v0.1.19](./release-notes/v0.1.19.md), which carries the substantive changes since the last documented release: member startup survives a host that disables or renames its delegation tools, automatic repair scope is derived from `requiredFix`, and captains gain `agent_teams_amend_task`. Recommended host: DeepSeek Harness `0.1.5-rc.1`; the three older supported host targets are retained.
 
 ## Why AgentTeams?
 
@@ -49,14 +49,14 @@ The conversation card and activity panel use Harness's official locale service. 
 
 ## Install and choose versions
 
-**Recommended pair: DeepSeek Harness `0.1.5-rc.1` + AgentTeams `0.1.17`. Harness remains a prerelease.**
+**Recommended pair: DeepSeek Harness `0.1.5-rc.1` + AgentTeams `0.1.20`. Harness remains a prerelease.**
 
 | Use case | DeepSeek Harness | AgentTeams plugin |
 | --- | --- | --- |
-| **Recommended installation** | **`0.1.5-rc.1`** | **`0.1.17`** |
-| Retaining an older RC | `0.1.2-rc.1` | `0.1.17` |
-| Developer Alpha testing | `0.1.2-alpha.5` | `0.1.17` |
-| Retaining an older Alpha | `0.1.2-alpha.2` | `0.1.17` |
+| **Recommended installation** | **`0.1.5-rc.1`** | **`0.1.20`** |
+| Retaining an older RC | `0.1.2-rc.1` | `0.1.20` |
+| Developer Alpha testing | `0.1.2-alpha.5` | `0.1.20` |
+| Retaining an older Alpha | `0.1.2-alpha.2` | `0.1.20` |
 
 ### 1. Install DeepSeek Harness
 
@@ -72,12 +72,12 @@ Skip this if you already run this version. Alpha is opt-in: select an exact Alph
 Install into the `web` profile. Replace the profile name if needed:
 
 ```sh
-dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.17
+dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.20
 ```
 
 **After installation, stop and restart Harness for that profile, then refresh the browser.**
 
-The default npm `latest` tag points to `0.1.17`, so `dsh plugin --profile web add @nanmicoder/dsh-agent-teams` installs this version on a fresh profile. Use the exact-version command above to pin it. The recommended Harness version is `0.1.5-rc.1`; installing the plugin does not upgrade the host. See the [source installation guide](./docs/maintenance-workflow.md) and [release verification](./docs/releases/v0.1.17/README.md).
+The default npm `latest` tag points to `0.1.20`, so `dsh plugin --profile web add @nanmicoder/dsh-agent-teams` installs this version on a fresh profile. Use the exact-version command above to pin it. The recommended Harness version is `0.1.5-rc.1`; installing the plugin does not upgrade the host. See the [source installation guide](./docs/maintenance-workflow.md) and [release verification](./docs/releases/v0.1.19/README.md).
 
 > Desktop users must check the app's embedded Harness core; upgrading the global CLI does not upgrade it. For older `0.1.0-*` / `0.1.1-*` or unlisted hosts, keep a working pair and follow the [older-version and diagnostic guide](./docs/maintenance-workflow.md).
 
@@ -100,7 +100,7 @@ Team state is stored under `<workspace>/.agent-teams/`; the Web panel reads that
 
 Member creation is zero-interaction by default: a member on the captain's current LLM route snapshots that provider, model, and reasoning effort, while a member on a requested alternative route snapshots the target model's default effort; later continuations restore the resolved snapshot. Only an explicit heterogeneous-team request (for example, “backend on provider A/model X, frontend on provider B/model Y”) supplies a member-specific `provider` + `model`; there is no per-member model or reasoning prompt.
 
-Captain sessions keep the concise core protocol and the original 13 native team tools from their first request. All business tools are directly available; no loading tool or extra activation call is needed. Configured profiles retain their bounded directory in the fixed system prompt. Creating, approving, continuing or ending a team does not rewrite the system prompt or tool schemas. Core rules remain available after history compaction or discarded code-mode tool results. Members receive four team tools, fixed member instructions, and their ordinary coding/research tools. Web approval wakes the captain with a control message; later member reports wake it again. See the [fixed protocol and benchmark contract](./docs/progressive-loading.md).
+Captain sessions keep the concise core protocol and the original 14 native team tools from their first request. All business tools are directly available; no loading tool or extra activation call is needed. Configured profiles retain their bounded directory in the fixed system prompt. Creating, approving, continuing or ending a team does not rewrite the system prompt or tool schemas. Core rules remain available after history compaction or discarded code-mode tool results. Members receive four team tools, fixed member instructions, and their ordinary coding/research tools. Web approval wakes the captain with a control message; later member reports wake it again. See the [fixed protocol and benchmark contract](./docs/progressive-loading.md).
 
 ## Slash command
 
