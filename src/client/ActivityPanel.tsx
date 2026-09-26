@@ -23,8 +23,10 @@ import {
 } from 'react'
 import {
   IconBranchOutline16, IconChevronDownOutline14, IconPanelLeftOutline16,
-  IconStopFill16, IconWarningOutline16, Modal,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+  IconStopFill16, IconWarningOutline16,
+} from './icons.tsx'
+import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { currentSessionId } from './session-navigation.ts'
 import type { ModelDirectory, ModelDirectoryResolver } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -253,6 +255,8 @@ function memberStatusText(
   }
   if (member.total === 0) return t('member.status.waitingAssignment')
   if (member.done === member.total) return t('member.status.delivered')
+  if (owned.some((task) => task.status === 'failed')) return t('task.detail.failed')
+  if (owned.length > 0 && owned.every((task) => task.status === 'completed' || task.status === 'cancelled')) return t('member.status.settled')
   return t(member.activity === 'idle' ? 'member.status.idle' : 'member.status.unknown')
 }
 
@@ -302,7 +306,7 @@ function ProgressOverview({ team, t, discarded = false }: { readonly team: Activ
   const settled = !discarded && team.tasks.length > 0 && team.tasks.every((task) => (
     task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
   ))
-  const summaryTone = discarded ? 'discarded' : blocked > 0 ? 'warning' : settled ? 'completed' : 'running'
+  const summaryTone = discarded ? 'discarded' : blocked > 0 || team.tasks.some(task => task.status === 'failed' || task.status === 'cancelled') ? 'warning' : settled ? 'completed' : 'running'
   return (
     <section className={css.progressOverview} aria-label={t('progress.aria')} data-progress-summary>
       <span className={css.progressTitle}>{t('progress.title')}</span>
@@ -324,11 +328,13 @@ function ProgressOverview({ team, t, discarded = false }: { readonly team: Activ
   )
 }
 
-function DependencyMap({ tasks, members, t, discarded = false }: {
+function DependencyMap({ tasks, members, t, discarded = false, workspace = false, onSelectTask }: {
   readonly tasks: readonly ActivityTask[]
   readonly members: readonly ActivityMember[]
   readonly t: AgentTeamsTranslate
   readonly discarded?: boolean
+  readonly workspace?: boolean
+  readonly onSelectTask?: (id: string | null) => void
 }) {
   const [open, setOpen] = useState(true)
   const [hoverTaskId, setHoverTaskId] = useState<string | null>(null)
@@ -336,7 +342,10 @@ function DependencyMap({ tasks, members, t, discarded = false }: {
   const [pinnedTaskId, setPinnedTaskId] = useState<string | null>(null)
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const focusedTaskId = dependencyFocusTaskId(pinnedTaskId, keyboardTaskId, hoverTaskId)
-  const layout = useMemo(() => compactDagLayout(tasks), [tasks])
+  const nodeWidth = workspace ? 164 : COMPACT_DAG_NODE_WIDTH
+  const nodeHeight = workspace ? 76 : COMPACT_DAG_NODE_HEIGHT
+  const layout = useMemo(() => compactDagLayout(tasks, workspace
+    ? { nodeWidth: 164, nodeHeight: 76, columnGap: 36, rowGap: 16 } : undefined), [tasks, workspace])
   const parallel = useMemo(() => usesParallelTaskGrid(tasks), [tasks])
   const related = useMemo(
     () => focusedTaskId === null ? null : relatedTaskIds(focusedTaskId, tasks),
@@ -361,11 +370,11 @@ function DependencyMap({ tasks, members, t, discarded = false }: {
   }, [])
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setPinnedTaskId(null)
+      if (event.key === 'Escape') { setPinnedTaskId(null); onSelectTask?.(null) }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => { window.removeEventListener('keydown', onKeyDown) }
-  }, [])
+  }, [onSelectTask])
   if (tasks.length === 0) return null
   const fallbackTask = tasks.find((task) => task.state === 'blocked')
     ?? tasks.find((task) => task.state === 'running')
@@ -383,7 +392,7 @@ function DependencyMap({ tasks, members, t, discarded = false }: {
           <Chevron open={open} /><IconBranchOutline16 /> {t(parallel ? 'dependency.parallel' : 'dependency.title')}
         </button>
         <span className={css.sectionHint}>{pinnedTaskId === null
-          ? t(parallel ? 'dependency.hint.parallel' : 'dependency.hint.chain')
+          ? t(parallel ? 'dependency.hint.parallel' : workspace ? 'workspace.dependencies' : 'dependency.hint.chain')
           : t('dependency.hint.pinned', { taskId: pinnedTaskId })}</span>
       </header>
       {open && (
@@ -402,15 +411,14 @@ function DependencyMap({ tasks, members, t, discarded = false }: {
               </svg>}
               {layout.nodes.map(({ task, x, y }) => {
                 const model = taskModelLabel(task, members)
-                const shortModel = compactModelLabel(model)
                 return (
                   <button
                     key={task.id}
                     type="button"
                     className={css.dagNode}
                     style={parallel
-                      ? { height: COMPACT_DAG_NODE_HEIGHT }
-                      : { left: x, top: y, width: COMPACT_DAG_NODE_WIDTH, height: COMPACT_DAG_NODE_HEIGHT }}
+                      ? { height: nodeHeight }
+                      : { left: x, top: y, width: nodeWidth, height: nodeHeight }}
                     data-task-id={task.id}
                     data-state={discarded ? 'cancelled' : taskTone(task.state, task.status)}
                     data-task-model={model || undefined}
@@ -418,15 +426,15 @@ function DependencyMap({ tasks, members, t, discarded = false }: {
                     data-dimmed={related !== null && !related.has(task.id)}
                     aria-pressed={pinnedTaskId === task.id}
                     title={taskTitle(task, model)}
-                    onClick={() => { setPinnedTaskId((current) => current === task.id ? null : task.id) }}
+                    onClick={() => { const next = pinnedTaskId === task.id ? null : task.id; setPinnedTaskId(next); onSelectTask?.(next) }}
                     onMouseEnter={() => { scheduleHover(task.id) }}
                     onMouseLeave={() => { scheduleHover(null) }}
                     onFocus={() => { setKeyboardTaskId(task.id) }}
                     onBlur={() => { setKeyboardTaskId(null) }}
                   >
-                    <span className={css.dagNodeHead}><span className={css.dagNodeDot} />{task.id}</span>
+                    <span className={css.dagNodeHead}><span className={css.dagNodeDot} />{task.id}{workspace && <span className={css.dagOwner}>{task.assignee || t('task.assignee.unclaimed')}</span>}</span>
                     <span className={css.dagNodeLabel}>
-                      {task.state === 'running' && shortModel !== '' ? shortModel : compactTaskLabel(task.subject)}
+                      {workspace ? task.subject : compactTaskLabel(task.subject)}
                     </span>
                     {task.state === 'running' && (
                       <span className={css.dagRunningState} aria-label={t('task.runningAria')}>
@@ -451,6 +459,10 @@ function DependencyMap({ tasks, members, t, discarded = false }: {
                 ? t('task.detail.notRun')
                 : detailTask.status === 'completed'
                 ? t('task.detail.completed')
+                : detailTask.status === 'cancelled'
+                  ? t('task.detail.cancelled')
+                : detailTask.status === 'failed'
+                  ? t('task.detail.failed')
                 : detailTask.dependencies.length === 0
                 ? t('task.detail.noPrerequisite')
                 : waitingOn.length === 0
@@ -472,7 +484,7 @@ function DependencyMap({ tasks, members, t, discarded = false }: {
   )
 }
 
-function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscarded, onNavigate, t, historic = false }: {
+export function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscarded, onNavigate, t, historic = false, workspace = false }: {
   readonly team: ActivityTeam
   readonly modelDirectory?: ModelDirectory
   readonly onContinuePlanning?: () => void
@@ -481,8 +493,11 @@ function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscarded, on
   readonly onNavigate: (parentId: SessionId, childId: SessionId) => void
   readonly t: AgentTeamsTranslate
   readonly historic?: boolean
+  readonly workspace?: boolean
 }) {
-  const [membersOpen, setMembersOpen] = useState(false)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const selectedAssignee = team.tasks.find(task => task.id === selectedTaskId)?.assignee
+  const [membersOpen, setMembersOpen] = useState(workspace)
   const [stopOpen, setStopOpen] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [stopError, setStopError] = useState('')
@@ -531,7 +546,7 @@ function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscarded, on
   }
   return (
     <>
-      <section className={css.team} data-team-id={team.teamId}>
+      <section className={css.team} data-team-id={team.teamId} data-workspace-team={workspace || undefined}>
         <header className={css.teamHead}>
           <span className={css.teamName} title={team.name}>{team.name}</span>
           {historic && <span className={css.historicPill}>{t(discarded ? 'team.discarded' : 'team.ended')}</span>}
@@ -633,7 +648,7 @@ function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscarded, on
                   const owned = team.tasks.filter((task) => task.assignee === member.name)
                   const memberModel = memberRouteLabel(member)
                   return (
-              <div key={member.id || member.name} className={css.memberBlock} data-activity={member.activity}>
+              <div key={member.id || member.name} className={css.memberBlock} data-activity={member.activity} data-selected-member={workspace && selectedAssignee === member.name || undefined}>
                 <span className={css.memberBranch} aria-hidden><span /></span>
                 <button
                   type="button"
@@ -725,7 +740,7 @@ function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscarded, on
         })()}
       </section>
 
-      <DependencyMap tasks={team.tasks} members={team.members} t={t} discarded={discarded} />
+      <DependencyMap tasks={team.tasks} members={team.members} t={t} discarded={discarded} workspace={workspace} onSelectTask={setSelectedTaskId} />
       </section>
       <Modal
         open={stopOpen}
@@ -751,7 +766,7 @@ function TeamSection({ team, modelDirectory, onContinuePlanning, onDiscarded, on
 
 /** Legacy conversation cards may outlive their host archive. Project their
  * durable roster through the same rebuilt panel instead of a second UI. */
-function historicCardTeam(data: AgentTeamsCardData, owner: string): ActivityTeam {
+export function historicCardTeam(data: AgentTeamsCardData, owner: string): ActivityTeam {
   return {
     workspace: '',
     teamId: data.teamId,
@@ -806,10 +821,10 @@ export function ActivityPanel({ sessionsList, modelDirectories, openMember, t, c
   const gestureRef = useRef<PanelGesture | null>(null)
   const frameRef = useRef<number | null>(null)
   const pendingLayoutRef = useRef<PanelLayout | null>(null)
-  const current = useSyncExternalStore(
+  const current = currentSessionId(useSyncExternalStore(
     sessionsList.subscribe,
     sessionsList.getSnapshot,
-  ).current
+  ))
   const autoOpenTrackerRef = useRef<{
     sessionId: SessionId | undefined
     restoreComplete: boolean

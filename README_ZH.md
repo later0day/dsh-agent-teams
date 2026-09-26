@@ -25,12 +25,12 @@
 你只需用自然语言提出目标。插件会提供精简的固定团队协议、14 个业务工具、持久化状态、自动共享任务调度和实时 Web UI，不需要额外的 Workflow 引擎。
 
 <p align="center">
-  <img src="./assets/ui.png" width="100%" alt="DeepSeek Harness 对话与 AgentTeams 实时活动面板，展示成员、任务依赖和回报">
+  <img src="./assets/readme/workspace.png" width="100%" alt="DeepSeek Harness 对话与 AgentTeams 实时活动面板，展示成员、任务依赖和回报">
 </p>
 
 ## 版本更新
 
-[v0.1.20](./release-notes/v0.1.20.md) 仅把本文档中的版本引用同步到 npm `latest`，不含任何代码或行为变更，打包产物与 [v0.1.19](./release-notes/v0.1.19.md) 完全一致；该版本带来上一份文档版本以来的实质变更：宿主禁用或改名委派工具时成员仍能正常启动；自动修复范围改为从 `requiredFix` 推导；新增队长专用的 `agent_teams_amend_task`。推荐 DeepSeek Harness `0.1.5-rc.1`，保留三个旧宿主目标。
+[v0.1.21](./release-notes/v0.1.21.md) 将团队协作移入 Harness 原生工作区，恢复聊天中的「查看团队」入口，并修复窄宽度布局。npm `latest` 对应此版本；推荐搭配 Harness `0.1.7-rc.2`（宿主的 `next` 渠道）。精确支持范围见 [compatibility.json](./compatibility.json)。
 
 ## 为什么需要 AgentTeams？
 
@@ -48,19 +48,20 @@
 
 ## 安装与版本选择
 
-**推荐组合：DeepSeek Harness `0.1.5-rc.1` + AgentTeams `0.1.20`。Harness 仍为预发布版本。**
+**推荐组合：DeepSeek Harness `0.1.7-rc.2` + AgentTeams `0.1.21`。Harness 仍为预发布版本。**
 
 | 使用场景 | DeepSeek Harness | AgentTeams 插件 |
 | --- | --- | --- |
-| **推荐安装** | **`0.1.5-rc.1`** | **`0.1.20`** |
-| 保留旧 RC | `0.1.2-rc.1` | `0.1.20` |
-| 开发者测试 Alpha | `0.1.2-alpha.5` | `0.1.20` |
-| 保留旧 Alpha | `0.1.2-alpha.2` | `0.1.20` |
+| **推荐版本** | **`0.1.7-rc.2`** | **`0.1.21`** |
+| 保留旧 RC | `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.5-rc.3` | `0.1.21` |
+| 保留旧 RC | `0.1.2-rc.1` | `0.1.21` |
+| 开发者测试 Alpha | `0.1.2-alpha.5` | `0.1.21` |
+| 保留旧 Alpha | `0.1.2-alpha.2` | `0.1.21` |
 
 ### 1. 安装 DeepSeek Harness
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.1.5-rc.1
+npm install --global @deepseek-ai/dsh@0.1.7-rc.2
 dsh --version
 ```
 
@@ -68,15 +69,15 @@ dsh --version
 
 ### 2. 安装 AgentTeams 插件
 
-安装到 `web` profile；使用其他 profile 时替换名称：
+从 npm 安装或升级插件（命令锁定本次 `latest` 的具体版本）：
 
 ```sh
-dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.20
+dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.21
 ```
 
-**安装后，停止并重新启动该 profile 的 Harness 进程，再刷新浏览器。**
+将 `web` 换成实际使用的 profile。**安装后，停止并重新启动该 profile 的 Harness 进程，再刷新浏览器。** 安装插件不会自动升级宿主；Harness 的 `latest` 与插件的 `latest` 是两个独立渠道。
 
-npm 默认标签 `latest` 现指向 `0.1.20`，因此新 profile 使用 `dsh plugin --profile web add @nanmicoder/dsh-agent-teams` 即可安装本版；需要锁定版本时使用上面的精确版本命令。推荐宿主为 Harness `0.1.5-rc.1`，安装插件不会自动升级宿主。源码安装见[维护指南](./docs/maintenance-workflow.md)，验证范围见[本版验收记录](./docs/releases/v0.1.19/README.md)。
+源码用户拉取代码后需重新运行 `pnpm install --frozen-lockfile` 和 `pnpm build`，再重启对应的 Harness；只更新 Git 不会更新本地构建产物。详见[维护指南](./docs/maintenance-workflow.md)。
 
 > Desktop 用户需核对应用内置的 Harness 核心；全局 CLI 升级不会升级桌面内核。旧 `0.1.0-*` / `0.1.1-*` 或其他未列出的宿主，请先保留已工作的组合，参考[旧版本与诊断指引](./docs/maintenance-workflow.md)。
 
@@ -87,6 +88,12 @@ npm 默认标签 `latest` 现指向 `0.1.20`，因此新 profile 使用 `dsh plu
 > 使用 AgentTeams 审查 v0.5.3 之后的提交，分别从性能、安全和产品角度分工，最后输出一份汇总报告。
 
 队长会话从第一轮起保留精简的固定核心协议和原有 14 个业务工具，直接调用，无需额外的加载工具或激活调用。已配置模板的精简目录固定保留。创建、批准、继续或结束团队都不会改写系统提示词和工具 schema，会话压缩或代码模式丢弃工具结果也不会丢失核心规则。成员保留四个团队工具、固定成员说明及普通编程/研究工具。Web 批准后会通知并唤醒队长，后续成员报告会再次唤醒它，无需忙轮询。详见[固定协议与 benchmark 标准](./docs/progressive-loading.md)。
+
+## 在工作区查看团队
+
+从当前聊天标题栏或回复下方的团队卡片点击 **查看团队**，在原生「团队协作」标签页中查看成员分工、任务依赖和执行进度。入口跟随所属聊天，不放在通用工作区开始页。
+
+页面直接呈现团队和任务内容；宽屏并排展示，窄分栏自动堆叠。点击任务可定位负责成员，成员图标可打开对应会话。关闭标签页不会停止团队；回到所属聊天可以再次打开。已完成团队保留归档，旧宿主继续使用活动面板。
 
 ## 工作方式
 
