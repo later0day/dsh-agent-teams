@@ -30,7 +30,7 @@ Ask in natural language. The plugin provides the team protocol, 14 coordination 
 
 ## Releases
 
-[v0.1.21](./release-notes/v0.1.21.md) brings teams into the native Harness workspace, restores **View team** in chat, and fixes narrow layouts. This is the npm `latest` release; the recommended host is Harness `0.1.7-rc.2` (its `next` channel). See the exact [support matrix](./compatibility.json).
+[v0.1.22](./release-notes/v0.1.22.md) targets the published Harness `0.2.0-rc.2` packages and retains script-free Git installation. This plugin release uses npm `latest`; the recommended host is Harness `0.2.0-rc.2` (its `next` channel). See the exact [support matrix](./compatibility.json).
 
 ## Why AgentTeams?
 
@@ -49,38 +49,53 @@ The conversation card and activity panel use Harness's official locale service. 
 
 ## Install and choose versions
 
-**Recommended pair: DeepSeek Harness `0.1.7-rc.2` + AgentTeams `0.1.21`. Harness remains a prerelease.**
+**Recommended pair: DeepSeek Harness `0.2.0-rc.2` + AgentTeams `0.1.22`. The host remains an RC.**
 
 | Use case | DeepSeek Harness | AgentTeams plugin |
 | --- | --- | --- |
-| **Recommended** | **`0.1.7-rc.2`** | **`0.1.21`** |
-| Legacy RC | `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.5-rc.3` | `0.1.21` |
-| Retaining an older RC | `0.1.2-rc.1` | `0.1.21` |
-| Developer Alpha testing | `0.1.2-alpha.5` | `0.1.21` |
-| Retaining an older Alpha | `0.1.2-alpha.2` | `0.1.21` |
+| **Recommended** | **`0.2.0-rc.2`** | **`0.1.22`** |
+| Previous recommended RC | `0.1.7-rc.2` | `0.1.22` |
+| Legacy RC | `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.5-rc.3` | `0.1.22` |
+| Retaining an older RC | `0.1.2-rc.1` | `0.1.22` |
+| Developer Alpha testing | `0.1.2-alpha.5` | `0.1.22` |
+| Retaining an older Alpha | `0.1.2-alpha.2` | `0.1.22` |
 
-### 1. Install DeepSeek Harness
+### Desktop app
+
+In the app sidebar, open **Plugins → Add plugin** and enter the npm package spec:
+
+```text
+@nanmicoder/dsh-agent-teams@0.1.22
+```
+
+Install it, then choose **Enable now**. If the host asks for a restart, restart the desktop app. Use the package spec above for the published build; an npm or GitHub webpage URL is not the same install source. For Git installation, use a commit containing the verified build outputs described below.
+
+The desktop app supplies its own Harness core and package manager. Upgrading the global CLI does not upgrade that core, and an ordinary standalone CLI cannot manage its desktop profile. The CLI carrier installed by the desktop app can manage that profile in `0.2.0-rc.2`. Check the embedded core against the compatibility list. Harness `0.2.0-rc.2` is now the exact published target; its RC status is unchanged. The earlier source-only `0.2.0` prediction is no longer a support declaration. See the [release migration evidence](./docs/harness-0.2.0-rc.2/README.md).
+
+### CLI / Web: 1. Install DeepSeek Harness
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.1.7-rc.2
+npm install --global @deepseek-ai/dsh@0.2.0-rc.2
 dsh --version
 ```
 
 Skip this if you already run this version. Alpha is opt-in: select an exact Alpha version from the table and lock all host dependencies as described in the [maintenance guide](./docs/maintenance-workflow.md).
 
-### 2. Install the AgentTeams plugin
+### CLI / Web: 2. Install the AgentTeams plugin
 
 Install or upgrade from npm (pinned to this `latest` release):
 
 ```sh
-dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.21
+dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.22
 ```
 
-Replace `web` with your active profile. **Stop and restart that profile's Harness process, then refresh the browser.** Installing the plugin does not upgrade Harness; the host and plugin have independent `latest` channels.
+For a CLI-managed installation, replace `web` with your active CLI profile. **Stop and restart that profile's Harness process, then refresh the browser.** Installing the plugin does not upgrade Harness; the host and plugin have independent `latest` channels.
 
-For source installations, run `pnpm install --frozen-lockfile` and `pnpm build` after pulling, then restart the corresponding Harness process. Updating Git alone does not update local build output. See the [maintenance guide](./docs/maintenance-workflow.md).
+For Git installation, use a Git package spec pinned to a commit containing the verified server, client, and type build outputs in `lib/`, rather than an npm webpage URL. The repository distributes these outputs so installation does not need a `prepare` hook or build-script approval. Source maintainers must run `pnpm build` and update the committed outputs whenever the source changes. Existing npm releases remain immutable.
 
-> Desktop users must check the app's embedded Harness core; upgrading the global CLI does not upgrade it. For older `0.1.0-*` / `0.1.1-*` or unlisted hosts, keep a working pair and follow the [older-version and diagnostic guide](./docs/maintenance-workflow.md).
+For a manually cloned checkout, run `pnpm install --frozen-lockfile` and `pnpm build` after pulling, then restart the corresponding Harness process. Updating Git alone does not update local build output. See the [maintenance guide](./docs/maintenance-workflow.md).
+
+> For older `0.1.0-*` / `0.1.1-*` or unlisted hosts, keep a working pair and follow the [older-version and diagnostic guide](./docs/maintenance-workflow.md).
 
 See the full [compatibility matrix](./compatibility.json), [source installation and Alpha testing guide](./docs/maintenance-workflow.md), and [verification coverage and platform limits](./docs/maintenance-2026-09-06/release/README.md).
 

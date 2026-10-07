@@ -30,7 +30,7 @@
 
 ## 版本更新
 
-[v0.1.21](./release-notes/v0.1.21.md) 将团队协作移入 Harness 原生工作区，恢复聊天中的「查看团队」入口，并修复窄宽度布局。npm `latest` 对应此版本；推荐搭配 Harness `0.1.7-rc.2`（宿主的 `next` 渠道）。精确支持范围见 [compatibility.json](./compatibility.json)。
+[v0.1.22](./release-notes/v0.1.22.md) 切换到已发布的 Harness `0.2.0-rc.2`，保留无需构建脚本的 Git 安装。本插件正式版使用 npm `latest` 渠道；推荐搭配 Harness `0.2.0-rc.2`（宿主的 `next` 渠道）。精确支持范围见 [compatibility.json](./compatibility.json)。
 
 ## 为什么需要 AgentTeams？
 
@@ -48,38 +48,53 @@
 
 ## 安装与版本选择
 
-**推荐组合：DeepSeek Harness `0.1.7-rc.2` + AgentTeams `0.1.21`。Harness 仍为预发布版本。**
+**推荐组合：DeepSeek Harness `0.2.0-rc.2` + AgentTeams `0.1.22`。宿主仍为 RC 版本。**
 
 | 使用场景 | DeepSeek Harness | AgentTeams 插件 |
 | --- | --- | --- |
-| **推荐版本** | **`0.1.7-rc.2`** | **`0.1.21`** |
-| 保留旧 RC | `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.5-rc.3` | `0.1.21` |
-| 保留旧 RC | `0.1.2-rc.1` | `0.1.21` |
-| 开发者测试 Alpha | `0.1.2-alpha.5` | `0.1.21` |
-| 保留旧 Alpha | `0.1.2-alpha.2` | `0.1.21` |
+| **推荐版本** | **`0.2.0-rc.2`** | **`0.1.22`** |
+| 上一推荐 RC | `0.1.7-rc.2` | `0.1.22` |
+| 保留旧 RC | `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.5-rc.3` | `0.1.22` |
+| 保留旧 RC | `0.1.2-rc.1` | `0.1.22` |
+| 开发者测试 Alpha | `0.1.2-alpha.5` | `0.1.22` |
+| 保留旧 Alpha | `0.1.2-alpha.2` | `0.1.22` |
 
-### 1. 安装 DeepSeek Harness
+### 桌面端
+
+在应用侧栏打开「插件 → 添加插件」，输入 npm 包名和版本：
+
+```text
+@nanmicoder/dsh-agent-teams@0.1.22
+```
+
+安装完成后点击「立即启用」；宿主提示需要重启时，重启桌面应用。发布版请使用上面的包名，npm 或 GitHub 网页链接与 npm 包名不是同一种安装来源。从 Git 安装时，请选用包含下方所述已验证构建产物的提交。
+
+桌面端自带 Harness 内核与包管理器，升级全局 CLI 不会升级桌面端；普通独立 CLI 不能管理桌面 profile，桌面端自带的 CLI carrier 在此版本可以管理。当前精确目标是已发布的 `0.2.0-rc.2`，仍属于 RC；此前源码预测的 `0.2.0` 已退出支持声明。详见[迁移验收记录](./docs/harness-0.2.0-rc.2/README.md)。
+
+### CLI / Web：1. 安装 DeepSeek Harness
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.1.7-rc.2
+npm install --global @deepseek-ai/dsh@0.2.0-rc.2
 dsh --version
 ```
 
 已有该版本可跳过。Alpha 仅供主动测试：手动指定表中的 Alpha 版本，并按[维护指南](./docs/maintenance-workflow.md)锁定整组宿主依赖。
 
-### 2. 安装 AgentTeams 插件
+### CLI / Web：2. 安装 AgentTeams 插件
 
-从 npm 安装或升级插件（命令锁定本次 `latest` 的具体版本）：
+从 npm 安装或升级插件（命令锁定本次 `latest` 正式版）：
 
 ```sh
-dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.21
+dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.22
 ```
 
-将 `web` 换成实际使用的 profile。**安装后，停止并重新启动该 profile 的 Harness 进程，再刷新浏览器。** 安装插件不会自动升级宿主；Harness 的 `latest` 与插件的 `latest` 是两个独立渠道。
+CLI 管理的安装可将 `web` 换成实际使用的 CLI profile。**安装后，停止并重新启动该 profile 的 Harness 进程，再刷新浏览器。** 安装插件不会自动升级宿主；Harness 的 `latest` 与插件的 `latest` 是两个独立渠道。
 
-源码用户拉取代码后需重新运行 `pnpm install --frozen-lockfile` 和 `pnpm build`，再重启对应的 Harness；只更新 Git 不会更新本地构建产物。详见[维护指南](./docs/maintenance-workflow.md)。
+从 Git 安装时，使用固定到包含已验证 `lib/` 构建产物的提交的 Git 包规格，不要填 npm 网页链接。仓库随代码分发服务端、客户端和类型产物，安装时不需要执行 `prepare` 或批准构建脚本。源码维护者每次修改源码后，都需运行 `pnpm build` 并更新已提交的产物。已经发布的 npm 产物保持不变。
 
-> Desktop 用户需核对应用内置的 Harness 核心；全局 CLI 升级不会升级桌面内核。旧 `0.1.0-*` / `0.1.1-*` 或其他未列出的宿主，请先保留已工作的组合，参考[旧版本与诊断指引](./docs/maintenance-workflow.md)。
+手动克隆源码的用户，拉取代码后需重新运行 `pnpm install --frozen-lockfile` 和 `pnpm build`，再重启对应的 Harness；只更新 Git 不会更新本地构建产物。详见[维护指南](./docs/maintenance-workflow.md)。
+
+> 旧 `0.1.0-*` / `0.1.1-*` 或其他未列出的宿主，请先保留已工作的组合，参考[旧版本与诊断指引](./docs/maintenance-workflow.md)。
 
 完整[兼容清单](./compatibility.json)、[源码安装与 Alpha 验证](./docs/maintenance-workflow.md)、[已验证范围与平台限制](./docs/maintenance-2026-09-06/release/README.md)。
 
