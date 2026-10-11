@@ -19,7 +19,7 @@ import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { createUserMessage, LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
-import { guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, startMemberWithLenientFilter, steerMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
+import { guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, startMemberContinuable, startMemberWithLenientFilter, steerMemberPrompt, sessionOwnEvents } from './harness-compat.ts'
 import { markMailboxDelivered, appendMailbox, CAPTAIN_KEY, createMessage, readRetiredMemberIds, readTeamSync, readTeam, releaseMailboxDelivery, withTeamLock, writeTeam } from './state.ts'
 import { mailboxPrompt } from './mailbox.ts'
 import { nearestLiveLead } from './lineage.ts'
@@ -859,7 +859,7 @@ Do not start work until the scheduler or captain assigns a task in this turn.`
  * @param resolvedFilter - the member's effective tool filter (a selected
  *   policy, or the legacy captain-only filter when the member has none). The
  *   caller resolves it so `spawnMember` forwards exactly one immutable filter
- *   to `startContinuable`.
+ *   to the host's continuable member start.
  * @param relaxableDeny - deny names the lenient retry may drop for this
  *   member; the caller narrows it for a policy member so a name the owner
  *   declared is never silently removed.
@@ -880,7 +880,7 @@ export async function spawnMember(
 ): Promise<void> {
   // Fail loud at the first use: provider registration is a sibling plugin's
   // effect and may settle after this plugin mounts. Capability checks here
-  // mirror what startContinuable would reject, with an actionable error.
+  // mirror what the host's member start would reject, with an actionable error.
   const provider = ctx.subagents.getProvider(config.provider)
   if (provider === undefined) {
     throw new Error(
@@ -908,7 +908,7 @@ export async function spawnMember(
     startMemberWithLenientFilter(
       toolFilter => {
         acceptedFilter = toolFilter
-        return ctx.subagents.startContinuable({
+        return startMemberContinuable(ctx, {
           provider: config.provider,
           label,
           request: {
@@ -1049,17 +1049,30 @@ export function installMemberDelegationGuard(ctx: Context, stateDir: string, max
     }
   }
   ctx.effect(() => {
-    const start = runtime.start
-    const continuable = runtime.startContinuable
-    const startDescriptor = Object.getOwnPropertyDescriptor(runtime, 'start')
-    const continuableDescriptor = Object.getOwnPropertyDescriptor(runtime, 'startContinuable')
-    const guardedStart: typeof start = async (name, request) => { check(request.parent); return start.call(runtime, name, request) }
-    const guardedContinuable: typeof continuable = async spec => { check(spec.request.parent); return continuable.call(runtime, spec) }
-    runtime.start = guardedStart
-    runtime.startContinuable = guardedContinuable
+    // Wrap only the creation methods this host has: 0.2.1-alpha.2 replaced
+    // start/startContinuable with startActivation, and installing a wrapper
+    // over an absent method would advertise an API the host does not have.
+    const host = runtime as unknown as Record<string, unknown>
+    const parentOf: Record<string, (args: unknown[]) => Agent> = {
+      start: args => (args[1] as { parent: Agent }).parent,
+      startContinuable: args => (args[0] as { request: { parent: Agent } }).request.parent,
+      startActivation: args => (args[0] as { request: { parent: Agent } }).request.parent,
+    }
+    const installed: Array<[string, unknown, PropertyDescriptor | undefined]> = []
+    for (const [key, parent] of Object.entries(parentOf)) {
+      const original = host[key]
+      if (typeof original !== 'function') continue
+      const descriptor = Object.getOwnPropertyDescriptor(runtime, key)
+      const guarded = async (...args: unknown[]): Promise<unknown> => {
+        check(parent(args))
+        return (original as (...input: unknown[]) => Promise<unknown>).apply(runtime, args)
+      }
+      host[key] = guarded
+      installed.push([key, guarded, descriptor])
+    }
     return () => {
       active = false
-      for (const [key, fn, descriptor] of [['start', guardedStart, startDescriptor], ['startContinuable', guardedContinuable, continuableDescriptor]] as const) {
+      for (const [key, fn, descriptor] of installed) {
         if (Object.getOwnPropertyDescriptor(runtime, key)?.value !== fn) continue
         if (descriptor === undefined) Reflect.deleteProperty(runtime, key)
         else Object.defineProperty(runtime, key, descriptor)

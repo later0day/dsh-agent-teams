@@ -35,10 +35,22 @@ type Followup = (parent: Agent, childId: SessionId, content: ContentBlock[], opt
 type Queue = (parent: Agent, childId: SessionId, content: ContentBlock[], source: MessageSource, signal: AbortSignal) => Promise<MessageId>
 type Deliver = (parent: Agent, childId: SessionId, content: ContentBlock[], source: MessageSource, signal: AbortSignal, delivery: 'queue' | 'steer') => Promise<MessageId>
 type Send = (sender: Agent, targetId: SessionId, content: ContentBlock[], options: { signal: AbortSignal }) => Promise<MessageId>
+/** The continuable member creation every supported host accepts, in its pre-0.2.1-alpha.2 spelling. */
+export type MemberStartSpec = Parameters<Context['subagents']['startContinuable']>[0]
+// 0.2.1-alpha.2 retired startContinuable/start for one managed activation API.
+type ActivationStart = (spec: MemberStartSpec & { delivery: 'parent' | 'caller' }) => Promise<{
+  childId: SessionId
+  result: Promise<unknown>
+}>
+type Drain = (parent: Agent, childIds: readonly SessionId[]) => Promise<void>
 interface RuntimeBoundary {
   followup?: Followup
   registerContinuableSetup?: (setup: LegacySetup) => () => void
   sendMessage?: Send
+  startContinuable?: (spec: MemberStartSpec) => Promise<{ childId: SessionId }>
+  startActivation?: ActivationStart
+  drainContinuableChildren?: Drain
+  drainChildren?: Drain
   [hostPromptQueue]?: Queue
   [hostPromptDeliver]?: Deliver
 }
@@ -389,4 +401,46 @@ export async function startMemberWithLenientFilter<T>(
       current.deny = current.deny.filter(name => !droppable.includes(name))
     }
   }
+}
+
+/**
+ * Start one continuable member on the running host.
+ *
+ * 0.2.1-alpha.2 removed `startContinuable` in favor of `startActivation`
+ * (upgrade guide v0.2.1-alpha.1/subagent-activations). Parent delivery keeps
+ * the retired contract: the captain receives the settlement notice and the
+ * member gets the return-to-parent guidance. The activation is deliberately
+ * never disposed — a member outlives its first run and resumes through queued
+ * prompts; team teardown releases it with {@link drainMemberChildren}.
+ * @param ctx - the plugin context (injects `subagents`).
+ * @param spec - provider, label, member request, and caller cancellation.
+ * @returns the member's durable child session id.
+ */
+export async function startMemberContinuable(ctx: Context, spec: MemberStartSpec): Promise<{ childId: SessionId }> {
+  const runtime = boundary(ctx.subagents)
+  if (typeof runtime.startContinuable === 'function') return runtime.startContinuable.call(ctx.subagents, spec)
+  if (typeof runtime.startActivation !== 'function') return unsupported('no continuable member start')
+  const activation = await runtime.startActivation.call(ctx.subagents, { ...spec, delivery: 'parent' })
+  // The captured result also reaches the captain as a settlement notice; only
+  // a capture failure rejects, and it must not surface as an unhandled rejection.
+  activation.result.catch((error: unknown) => {
+    ctx.logger.warn(`agent-teams: member ${activation.childId} activation failed: ${String(error)}`)
+  })
+  return { childId: activation.childId }
+}
+
+/**
+ * Release selected resident members of one exact live captain. 0.2.1-alpha.2
+ * renamed `drainContinuableChildren` to `drainChildren` with the same targeted
+ * semantics; older hosts have no `drainChildren`.
+ * @param ctx - the plugin context (injects `subagents`).
+ * @param parent - the exact live captain.
+ * @param childIds - durable member ids to release when resident.
+ * @returns once every selected activation released its execution handle.
+ */
+export async function drainMemberChildren(ctx: Context, parent: Agent, childIds: readonly SessionId[]): Promise<void> {
+  const runtime = boundary(ctx.subagents)
+  const drain = runtime.drainContinuableChildren ?? runtime.drainChildren
+  if (typeof drain !== 'function') return unsupported('no targeted child drain')
+  await drain.call(ctx.subagents, parent, childIds)
 }

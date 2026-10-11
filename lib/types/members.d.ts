@@ -257,7 +257,7 @@ export declare function memberWelcome(team: TeamState, memberName: string): stri
  * @param resolvedFilter - the member's effective tool filter (a selected
  *   policy, or the legacy captain-only filter when the member has none). The
  *   caller resolves it so `spawnMember` forwards exactly one immutable filter
- *   to `startContinuable`.
+ *   to the host's continuable member start.
  * @param relaxableDeny - deny names the lenient retry may drop for this
  *   member; the caller narrows it for a policy member so a name the owner
  *   declared is never silently removed.

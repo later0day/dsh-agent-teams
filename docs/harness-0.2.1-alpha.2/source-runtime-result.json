@@ -1,0 +1,363 @@
+{
+  "kind": "source-candidate-verification",
+  "passed": true,
+  "preparedOnly": false,
+  "source": {
+    "kind": "local-source-checkout",
+    "directory": "/private/tmp/dsh-h-alpha2",
+    "repository": "https://github.com/deepseek-ai/deepseek-harness",
+    "commit": "d743267388641bc76f17c45ce8b4c231aed1d32c",
+    "trackedClean": true,
+    "runtimeVersion": "0.2.1-alpha.2",
+    "cliManifestVersion": "0.2.1-alpha.2",
+    "buildMode": "prebuilt-workspace",
+    "buildFreshness": "caller-responsibility",
+    "cliSha256": "f9f0f13209aaeb586712b52c0f4b84072db9b21ccce77984a5e8fb52dd553362",
+    "appBootSha256": "1ddbec4979030a905c099bfda1a3e20344bda6ed5a5f2dff31d9821020000e46",
+    "lockSha256": "b45f8695fb0dca90d3ed07afc766e923356539962706ee36ac8cdb396e6d734d"
+  },
+  "candidateGate": {
+    "kind": "simulated-runtime-version-gate",
+    "runtimeVersion": "0.2.1-alpha.2",
+    "passed": true,
+    "exemptions": {},
+    "incompatible": null,
+    "changesHostManifests": false,
+    "verifiesPublishedRelease": false
+  },
+  "artifactSha256": "1bc84b4f80df3ce40cf6cbaac892435f5d1cf1e4e185c9866f2fd6fda18cda31",
+  "pluginVersion": "0.1.23",
+  "testFiles": {
+    "harness-source-verify.mjs": "e5a62e28388ce0749d0540a0af695b28faa1a8e113660130c1e679251bc3bd4c",
+    "harness-runtime-scenarios.mjs": "f44fb5516235c8667caff504227f5aa01b7e931678640fe37769a555145c34d2",
+    "fixtures/harness-runtime-entry.mjs": "decd8d29d57abbbc390b9716f8fea4bd9e45c6c5a44d9c3ebe06e2389182c4ef",
+    "fixtures/harness-runtime-idle.mjs": "508f2437610624aaf5196c66c533a0f7b1da021343b1534c1a60818cca54bc72",
+    "fixtures/harness-runtime-llm.mjs": "22ee4ed933fcd73543c8ea63406682325b92b05bd61154a9b0222f74ee775b9e",
+    "fixtures/harness-runtime-protocol.mjs": "1be0de75af86c9fb96b35c88d2e52ac1c2e9eacc8a9f8451e58842df83736485",
+    "fixtures/harness-runtime-resume.mjs": "17f8be68c143a2f49e0c45de90665c4cf24aac2f06d8a415db062e71424b10a7",
+    "fixtures/harness-runtime-stability.mjs": "c1fc4067b542362be6ace8413bd48a800a1d2f5e27e5df4ac0bf9fea01059b92",
+    "fixtures/harness-runtime-web-approval.mjs": "466175266ce627df52e9622b767f3662dcae53e89c6c64b27cb2f5e2f47f49aa"
+  },
+  "node": "v24.15.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "cohortCount": 289,
+  "workspaceInventoryCount": 350,
+  "runs": [
+    {
+      "scenario": "lifecycle",
+      "passed": true,
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false
+      },
+      "assertions": {
+        "exit0": true,
+        "productMarker": true,
+        "pluginToolsVisible": true,
+        "memberExecuted": true,
+        "explicitReasoning": true,
+        "taskTerminal": true,
+        "secondWake": true,
+        "fifoMessageOrder": true,
+        "messagesSentWhileBusy": true
+      },
+      "requests": 15,
+      "memberRequests": 6
+    },
+    {
+      "scenario": "lifecycle-cold-restore",
+      "passed": true,
+      "assertions": {
+        "exit0": true,
+        "driverCompleted": true,
+        "sameMemberRestored": true,
+        "routeRestored": true,
+        "reasoningRestored": true
+      },
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false
+      }
+    },
+    {
+      "scenario": "fallback",
+      "passed": true,
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false
+      },
+      "assertions": {
+        "exit0": true,
+        "productMarker": true,
+        "pluginToolsVisible": true,
+        "memberExecuted": true,
+        "explicitReasoning": true,
+        "taskTerminal": true,
+        "secondWake": true,
+        "fallbackActivated": true,
+        "fallbackReasoningReset": true
+      },
+      "requests": 14,
+      "memberRequests": 7
+    },
+    {
+      "scenario": "fallback-cold-restore",
+      "passed": true,
+      "assertions": {
+        "exit0": true,
+        "driverCompleted": true,
+        "sameMemberRestored": true,
+        "routeRestored": true,
+        "reasoningRestored": true
+      },
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false
+      }
+    },
+    {
+      "scenario": "failure",
+      "passed": true,
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false
+      },
+      "assertions": {
+        "exit0": true,
+        "productMarker": true,
+        "pluginToolsVisible": true,
+        "memberExecuted": true,
+        "explicitReasoning": true,
+        "taskTerminal": true
+      },
+      "requests": 6,
+      "memberRequests": 1
+    },
+    {
+      "scenario": "captain-idle-wakeup",
+      "passed": true,
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false
+      },
+      "assertions": {
+        "exit0": true,
+        "productMarker": true,
+        "pluginToolsVisible": true,
+        "memberExecuted": true,
+        "explicitReasoning": true,
+        "taskTerminal": true,
+        "captainActuallyYielded": true,
+        "notifiedAfterIdle": true
+      },
+      "requests": 10,
+      "memberRequests": 5
+    },
+    {
+      "scenario": "progressive-entry",
+      "passed": true,
+      "assertions": {
+        "exit0": true,
+        "productMarker": true,
+        "allEntries": true,
+        "stablePrefixes": true,
+        "thirtyOrdinaryTurns": true
+      },
+      "cases": [
+        "natural",
+        "natural-zh",
+        "raw-slash",
+        "command",
+        "profile-command",
+        "profile-raw"
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false
+      }
+    },
+    {
+      "scenario": "web-approval",
+      "passed": true,
+      "assertions": {
+        "exit0": true,
+        "productMarker": true,
+        "driverCompleted": true,
+        "stagedBeforeApproval": true,
+        "independentApprovalWake": true,
+        "reportWakeAfterYield": true,
+        "noPollingOrDuplicateApproval": true,
+        "oneUserMessageAndHttpApproval": true,
+        "invalidTeamRejected": true,
+        "repeatApprovalRejected": true,
+        "stableCaptainHeaders": true,
+        "memberFourTools": true,
+        "taskCompleted": true
+      },
+      "evidence": {
+        "event": "web-approval-passed",
+        "sessionId": "session-547409d5-c7c4-43dc-b789-6b44ddf7758b",
+        "teamId": "runtime-lab",
+        "memberId": "b939211b-fa4b-4d7a-89ee-fb9884962e35",
+        "taskStatus": "completed",
+        "captainRequests": 6,
+        "order": 29,
+        "time": 1791727168621
+      },
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false
+      }
+    },
+    {
+      "scenario": "protocol-compatibility",
+      "passed": true,
+      "assertions": {
+        "exit0": true,
+        "productMarker": true,
+        "legacyAllowlistAndColdRestore": true,
+        "legacyProfileDirectory": true,
+        "actualPtcDiscard": true,
+        "actualPruning": true,
+        "actualCompaction": true,
+        "existingPlanRevised": true,
+        "lifecycleArchived": true
+      },
+      "cases": [
+        {
+          "event": "protocol-case-passed",
+          "label": "legacy-allowlist-cold-compact",
+          "requests": 7,
+          "compactedHistory": true,
+          "persistedSubject": "Recovered task",
+          "archived": true,
+          "profile": "north"
+        },
+        {
+          "event": "protocol-case-passed",
+          "label": "ptc-discard-and-compact",
+          "requests": 9,
+          "compactedHistory": true,
+          "persistedSubject": "Recovered task",
+          "archived": true
+        }
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false
+      }
+    },
+    {
+      "scenario": "stability",
+      "passed": true,
+      "assertions": {
+        "exit0": true,
+        "productMarker": true,
+        "lazy-start": true,
+        "running-plan-correction": true,
+        "steering": true,
+        "read-receipt-continuation": true,
+        "reassign": true,
+        "archive": true,
+        "batch-plan": true,
+        "terminal-evidence": true,
+        "report-retry": true,
+        "settlement-dedup": true
+      },
+      "evidence": [
+        {
+          "event": "stability-lazy-start-passed",
+          "readyRequests": 1,
+          "blockedRequests": 0,
+          "welcomeRequests": 0,
+          "time": 1791727170475
+        },
+        {
+          "event": "stability-running-plan-correction-passed",
+          "pendingEdit": true,
+          "captainCancellation": true,
+          "blockedRequests": 0,
+          "time": 1791727170561
+        },
+        {
+          "event": "stability-steering-passed",
+          "queuedMessages": 32,
+          "modelStepsUntilConsumed": 1,
+          "time": 1791727171325
+        },
+        {
+          "event": "stability-read-receipt-continuation-passed",
+          "modelContinued": true,
+          "time": 1791727171394
+        },
+        {
+          "event": "stability-reassign-passed",
+          "sameMember": true,
+          "staleInputExcluded": true,
+          "time": 1791727171544
+        },
+        {
+          "event": "stability-archive-passed",
+          "pendingMessagesCleared": 32,
+          "descendantsStopped": true,
+          "siblingPreserved": true,
+          "retiredResumeRejected": true,
+          "time": 1791727172447
+        },
+        {
+          "event": "stability-batch-plan-passed",
+          "members": 5,
+          "tasks": 6,
+          "setupToolCalls": 1,
+          "previousEquivalentToolCalls": 12,
+          "memberModelRequests": 0,
+          "time": 1791727172513
+        },
+        {
+          "event": "stability-terminal-evidence-passed",
+          "records": 1,
+          "duplicateAppend": false,
+          "originalResultPreserved": true,
+          "time": 1791727172797
+        },
+        {
+          "event": "stability-report-retry-passed",
+          "duplicateModelRequests": 0,
+          "time": 1791727172872
+        },
+        {
+          "event": "stability-settlement-dedup-passed",
+          "reportWakes": 1,
+          "duplicateModelRequests": 0,
+          "time": 1791727172897
+        }
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "timedOut": false
+      }
+    }
+  ],
+  "unverified": [
+    "published candidate-version artifact and dependency closure",
+    "npm/GitHub installation",
+    "real provider APIs and credentials",
+    "browser interaction",
+    "packaged Electron launch",
+    "other operating systems",
+    "native terminal execution",
+    "live user-data migration",
+    "prebuilt libraries reproducibly matching source checkout"
+  ]
+}
