@@ -108,7 +108,7 @@ export interface MemberSelectionRuntime {
     /** Trusted fresh-child admission, before the durable member id is written. */
     isPendingMember(agent: Agent): boolean;
     /** Make one selection visible while Harness materializes the fresh child. */
-    withPending<T>(parentSessionId: string, label: string, selection: MemberLlmSelection, operation: () => Promise<T>): Promise<T>;
+    withPending<T>(parentSessionId: string, label: string, selection: MemberLlmSelection, operation: () => Promise<T>, setup?: TeamMember['runtimeSetup']): Promise<T>;
 }
 /**
  * Validate a resolved roster against every provider catalog before any child
@@ -257,7 +257,7 @@ export declare function memberWelcome(team: TeamState, memberName: string): stri
  * @param resolvedFilter - the member's effective tool filter (a selected
  *   policy, or the legacy captain-only filter when the member has none). The
  *   caller resolves it so `spawnMember` forwards exactly one immutable filter
- *   to the host's continuable member start.
+ *   to `startContinuable`.
  * @param relaxableDeny - deny names the lenient retry may drop for this
  *   member; the caller narrows it for a policy member so a name the owner
  *   declared is never silently removed.

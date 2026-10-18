@@ -8,13 +8,30 @@
  * sendMessage instead steers a running Agent and must never carry team jobs.
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { Agent } from '@deepseek-ai/dsh-agent';
+import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent';
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm';
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session';
 import { type MemberToolFilter } from './tool-policies.ts';
 type Setup = (childCtx: Context, child: Agent) => () => void;
-/** The continuable member creation every supported host accepts, in its pre-0.2.1-alpha.2 spelling. */
-export type MemberStartSpec = Parameters<Context['subagents']['startContinuable']>[0];
+/** Version-independent creation contract; legacy-only options stay at this seam. */
+export interface MemberStartSpec {
+    provider: string;
+    label: string;
+    request: {
+        parent: Agent;
+        prompt: ContentBlock[];
+        agentOptions?: AgentOptions;
+        persona?: string;
+        toolFilter?: MemberToolFilter;
+    };
+    signal: AbortSignal;
+}
+export declare function usesManagedActivations(runtime: Context['subagents']): boolean;
+export declare function startMember(runtime: Context['subagents'], spec: MemberStartSpec): Promise<{
+    childId: SessionId;
+}>;
+/** Wrap every available creation API, restoring only this plugin's own methods. */
+export declare function guardSubagentCreation(ctx: Context, check: (parent: Agent) => void): void;
 declare module '@deepseek-ai/dsh-llm' {
     interface MessageSourceMap {
         'agent-teams': {
@@ -123,30 +140,6 @@ export declare function memberToolFilter(maxDepth: number | undefined, knownTool
  * @returns the started member.
  */
 export declare function startMemberWithLenientFilter<T>(start: (filter: MemberToolFilter) => Promise<T>, filter: MemberToolFilter, relaxableDeny?: readonly string[]): Promise<T>;
-/**
- * Start one continuable member on the running host.
- *
- * 0.2.1-alpha.2 removed `startContinuable` in favor of `startActivation`
- * (upgrade guide v0.2.1-alpha.1/subagent-activations). Parent delivery keeps
- * the retired contract: the captain receives the settlement notice and the
- * member gets the return-to-parent guidance. The activation is deliberately
- * never disposed — a member outlives its first run and resumes through queued
- * prompts; team teardown releases it with {@link drainMemberChildren}.
- * @param ctx - the plugin context (injects `subagents`).
- * @param spec - provider, label, member request, and caller cancellation.
- * @returns the member's durable child session id.
- */
-export declare function startMemberContinuable(ctx: Context, spec: MemberStartSpec): Promise<{
-    childId: SessionId;
-}>;
-/**
- * Release selected resident members of one exact live captain. 0.2.1-alpha.2
- * renamed `drainContinuableChildren` to `drainChildren` with the same targeted
- * semantics; older hosts have no `drainChildren`.
- * @param ctx - the plugin context (injects `subagents`).
- * @param parent - the exact live captain.
- * @param childIds - durable member ids to release when resident.
- * @returns once every selected activation released its execution handle.
- */
-export declare function drainMemberChildren(ctx: Context, parent: Agent, childIds: readonly SessionId[]): Promise<void>;
+/** Targeted recursive cancellation renamed with the unified activation manager. */
+export declare function drainMemberChildren(runtime: Context['subagents'], parent: Agent, ids: readonly SessionId[]): Promise<void>;
 export {};

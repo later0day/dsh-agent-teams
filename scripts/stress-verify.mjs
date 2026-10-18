@@ -12,7 +12,6 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { deliverSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { registerAgentTeamsTools } from '../lib/tools.js'
 import { readArchivedTeam, readTeam, readUnreadMailbox } from '../lib/state.js'
 
@@ -36,10 +35,9 @@ function check(label, condition, detail = '') {
 }
 
 function session(parentSession) {
-  const events = []
   return {
-    header: { cwd: workspace, parentSession },
-    ownEvents: () => events,
+    header: { cwd: workspace, parentSession, seedLength: 0 },
+    events: [],
     append() {},
     requestHeader() {
       return { config: { provider: 'stress', model: 'stress-model', reasoningEffort: 'high' } }
@@ -95,12 +93,9 @@ function mountRuntime() {
       listeners.set(name, current)
       return () => listeners.set(name, current.filter(candidate => candidate !== listener))
     },
-    agents: {
+    agents: { list: () => [],
       get(id) {
         return liveAgents.get(id)
-      },
-      list() {
-        return [...liveAgents.values()]
       },
     },
     llm: {
@@ -112,6 +107,9 @@ function mountRuntime() {
       },
     },
     subagents: {
+      registerContinuableSetup() {
+        return () => {}
+      },
       getProvider(name) {
         if (name !== 'spawn') return undefined
         return { prepareContinuable() {}, capabilities: { persona: true, toolFilter: true } }
@@ -140,31 +138,21 @@ function mountRuntime() {
       async listDescendants(parentId) {
         return this.listChildren(parentId)
       },
-      [deliverSubagentPrompt](_parent, childId, content) {
+      async followup(_parent, childId, content) {
         const remaining = failDeliveryCount.get(childId) ?? 0
         if (remaining > 0) {
           failDeliveryCount.set(childId, remaining - 1)
-          throw new Error('injected delivery failure')
+          throw new Error('injected followup failure')
         }
         let child = liveAgents.get(childId)
         if (child === undefined) {
-          // Harness cold-resumes a continuable child on a waking host delivery.
+          // Harness cold-resumes a continuable child on a waking followup.
           child = makeAgent(childId, captain.id)
           liveAgents.set(childId, child)
         }
         child.status = 'running'
         deliveries.push({ childId, content, runtime: runtime?.generation ?? 0 })
-        return Promise.resolve(`message-${++messageSeq}`)
-      },
-      sendMessage(_sender, childId, content) {
-        let child = liveAgents.get(childId)
-        if (child === undefined) {
-          child = makeAgent(childId, captain.id)
-          liveAgents.set(childId, child)
-        }
-        child.status = 'running'
-        deliveries.push({ childId, content, runtime: runtime?.generation ?? 0 })
-        return Promise.resolve(`message-${++messageSeq}`)
+        return `message-${++messageSeq}`
       },
       async drainContinuableChildren(_parent, ids) {
         for (const id of ids) { const child = liveAgents.get(id); if (child) { publishStatus(child, 'idle'); liveAgents.delete(id) } }

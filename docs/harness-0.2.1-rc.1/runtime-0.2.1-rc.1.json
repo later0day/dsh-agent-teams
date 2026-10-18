@@ -1,48 +1,23 @@
 {
-  "kind": "source-candidate-verification",
   "passed": true,
-  "preparedOnly": false,
-  "source": {
-    "kind": "local-source-checkout",
-    "directory": "/private/tmp/dsh-h-alpha2",
-    "repository": "https://github.com/deepseek-ai/deepseek-harness",
-    "commit": "d743267388641bc76f17c45ce8b4c231aed1d32c",
-    "trackedClean": true,
-    "runtimeVersion": "0.2.1-alpha.2",
-    "cliManifestVersion": "0.2.1-alpha.2",
-    "buildMode": "prebuilt-workspace",
-    "buildFreshness": "caller-responsibility",
-    "cliSha256": "f9f0f13209aaeb586712b52c0f4b84072db9b21ccce77984a5e8fb52dd553362",
-    "appBootSha256": "1ddbec4979030a905c099bfda1a3e20344bda6ed5a5f2dff31d9821020000e46",
-    "lockSha256": "b45f8695fb0dca90d3ed07afc766e923356539962706ee36ac8cdb396e6d734d"
-  },
-  "candidateGate": {
-    "kind": "simulated-runtime-version-gate",
-    "runtimeVersion": "0.2.1-alpha.2",
-    "passed": true,
-    "exemptions": {},
-    "incompatible": null,
-    "changesHostManifests": false,
-    "verifiesPublishedRelease": false
-  },
-  "artifactSha256": "1bc84b4f80df3ce40cf6cbaac892435f5d1cf1e4e185c9866f2fd6fda18cda31",
-  "pluginVersion": "0.1.23",
+  "version": "0.2.1-rc.1",
+  "artifactSha256": "df6170794fc56214f256d813efbc2d2abb5e58efb6ea9bd3e0c2ce5176924bd7",
+  "pluginVersion": "0.1.24-rc.1",
   "testFiles": {
-    "harness-source-verify.mjs": "e5a62e28388ce0749d0540a0af695b28faa1a8e113660130c1e679251bc3bd4c",
-    "harness-runtime-scenarios.mjs": "f44fb5516235c8667caff504227f5aa01b7e931678640fe37769a555145c34d2",
-    "fixtures/harness-runtime-entry.mjs": "decd8d29d57abbbc390b9716f8fea4bd9e45c6c5a44d9c3ebe06e2389182c4ef",
-    "fixtures/harness-runtime-idle.mjs": "508f2437610624aaf5196c66c533a0f7b1da021343b1534c1a60818cca54bc72",
+    "harness-runtime-verify.mjs": "3387141436803ccc030436a6f6c7286cc3c85f3642c368bd936da676d62037b9",
+    "harness-runtime-scenarios.mjs": "0a45bd756e5cae7d4783701c1ca3670f45f4c3a5864efc395fc8f6d6ecacf493",
     "fixtures/harness-runtime-llm.mjs": "22ee4ed933fcd73543c8ea63406682325b92b05bd61154a9b0222f74ee775b9e",
-    "fixtures/harness-runtime-protocol.mjs": "1be0de75af86c9fb96b35c88d2e52ac1c2e9eacc8a9f8451e58842df83736485",
     "fixtures/harness-runtime-resume.mjs": "17f8be68c143a2f49e0c45de90665c4cf24aac2f06d8a415db062e71424b10a7",
-    "fixtures/harness-runtime-stability.mjs": "c1fc4067b542362be6ace8413bd48a800a1d2f5e27e5df4ac0bf9fea01059b92",
-    "fixtures/harness-runtime-web-approval.mjs": "466175266ce627df52e9622b767f3662dcae53e89c6c64b27cb2f5e2f47f49aa"
+    "fixtures/harness-runtime-idle.mjs": "508f2437610624aaf5196c66c533a0f7b1da021343b1534c1a60818cca54bc72",
+    "fixtures/harness-runtime-entry.mjs": "decd8d29d57abbbc390b9716f8fea4bd9e45c6c5a44d9c3ebe06e2389182c4ef",
+    "fixtures/harness-runtime-web-approval.mjs": "466175266ce627df52e9622b767f3662dcae53e89c6c64b27cb2f5e2f47f49aa",
+    "fixtures/harness-runtime-protocol.mjs": "1be0de75af86c9fb96b35c88d2e52ac1c2e9eacc8a9f8451e58842df83736485",
+    "fixtures/harness-runtime-stability.mjs": "c049f4838a4123683dbe3024ef9b9d8441f691ac17da8e340654b7be0a753d21"
   },
-  "node": "v24.15.0",
+  "node": "v26.7.0",
   "platform": "darwin",
   "arch": "arm64",
-  "cohortCount": 289,
-  "workspaceInventoryCount": 350,
+  "cohortCount": 293,
   "runs": [
     {
       "scenario": "lifecycle",
@@ -57,6 +32,7 @@
         "productMarker": true,
         "pluginToolsVisible": true,
         "memberExecuted": true,
+        "memberToolsRestricted": true,
         "explicitReasoning": true,
         "taskTerminal": true,
         "secondWake": true,
@@ -70,6 +46,7 @@
       "scenario": "lifecycle-cold-restore",
       "passed": true,
       "assertions": {
+        "memberToolsRestricted": true,
         "exit0": true,
         "driverCompleted": true,
         "sameMemberRestored": true,
@@ -95,6 +72,7 @@
         "productMarker": true,
         "pluginToolsVisible": true,
         "memberExecuted": true,
+        "memberToolsRestricted": true,
         "explicitReasoning": true,
         "taskTerminal": true,
         "secondWake": true,
@@ -108,6 +86,7 @@
       "scenario": "fallback-cold-restore",
       "passed": true,
       "assertions": {
+        "memberToolsRestricted": true,
         "exit0": true,
         "driverCompleted": true,
         "sameMemberRestored": true,
@@ -133,6 +112,7 @@
         "productMarker": true,
         "pluginToolsVisible": true,
         "memberExecuted": true,
+        "memberToolsRestricted": true,
         "explicitReasoning": true,
         "taskTerminal": true
       },
@@ -152,6 +132,7 @@
         "productMarker": true,
         "pluginToolsVisible": true,
         "memberExecuted": true,
+        "memberToolsRestricted": true,
         "explicitReasoning": true,
         "taskTerminal": true,
         "captainActuallyYielded": true,
@@ -204,13 +185,13 @@
       },
       "evidence": {
         "event": "web-approval-passed",
-        "sessionId": "session-547409d5-c7c4-43dc-b789-6b44ddf7758b",
+        "sessionId": "session-7f58aab7-5e23-4e49-b39a-9f6474b8425a",
         "teamId": "runtime-lab",
-        "memberId": "b939211b-fa4b-4d7a-89ee-fb9884962e35",
+        "memberId": "ec10ec91-6b7b-4eb8-80b3-92317bee50fb",
         "taskStatus": "completed",
         "captainRequests": 6,
         "order": 29,
-        "time": 1791727168621
+        "time": 1792223143629
       },
       "exit": {
         "code": 0,
@@ -263,6 +244,7 @@
       "assertions": {
         "exit0": true,
         "productMarker": true,
+        "hmr": true,
         "lazy-start": true,
         "running-plan-correction": true,
         "steering": true,
@@ -276,35 +258,42 @@
       },
       "evidence": [
         {
+          "event": "stability-hmr-passed",
+          "sameAgent": true,
+          "persona": true,
+          "customToolDenied": true,
+          "time": 1792223146191
+        },
+        {
           "event": "stability-lazy-start-passed",
           "readyRequests": 1,
           "blockedRequests": 0,
           "welcomeRequests": 0,
-          "time": 1791727170475
+          "time": 1792223146191
         },
         {
           "event": "stability-running-plan-correction-passed",
           "pendingEdit": true,
           "captainCancellation": true,
           "blockedRequests": 0,
-          "time": 1791727170561
+          "time": 1792223146301
         },
         {
           "event": "stability-steering-passed",
           "queuedMessages": 32,
           "modelStepsUntilConsumed": 1,
-          "time": 1791727171325
+          "time": 1792223147333
         },
         {
           "event": "stability-read-receipt-continuation-passed",
           "modelContinued": true,
-          "time": 1791727171394
+          "time": 1792223147417
         },
         {
           "event": "stability-reassign-passed",
           "sameMember": true,
           "staleInputExcluded": true,
-          "time": 1791727171544
+          "time": 1792223147580
         },
         {
           "event": "stability-archive-passed",
@@ -312,7 +301,7 @@
           "descendantsStopped": true,
           "siblingPreserved": true,
           "retiredResumeRejected": true,
-          "time": 1791727172447
+          "time": 1792223148778
         },
         {
           "event": "stability-batch-plan-passed",
@@ -321,25 +310,25 @@
           "setupToolCalls": 1,
           "previousEquivalentToolCalls": 12,
           "memberModelRequests": 0,
-          "time": 1791727172513
+          "time": 1792223148861
         },
         {
           "event": "stability-terminal-evidence-passed",
           "records": 1,
           "duplicateAppend": false,
           "originalResultPreserved": true,
-          "time": 1791727172797
+          "time": 1792223149145
         },
         {
           "event": "stability-report-retry-passed",
           "duplicateModelRequests": 0,
-          "time": 1791727172872
+          "time": 1792223149195
         },
         {
           "event": "stability-settlement-dedup-passed",
           "reportWakes": 1,
           "duplicateModelRequests": 0,
-          "time": 1791727172897
+          "time": 1792223149212
         }
       ],
       "exit": {
@@ -350,14 +339,10 @@
     }
   ],
   "unverified": [
-    "published candidate-version artifact and dependency closure",
-    "npm/GitHub installation",
     "real provider APIs and credentials",
     "browser interaction",
-    "packaged Electron launch",
     "other operating systems",
     "native terminal execution",
-    "live user-data migration",
-    "prebuilt libraries reproducibly matching source checkout"
+    "live user-data migration"
   ]
 }

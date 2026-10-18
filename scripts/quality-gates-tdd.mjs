@@ -9,7 +9,6 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
-import { deliverSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { assignmentPrompt } from '../lib/scheduler.js'
 import { applyQualityFollowUp, haltTeamWork, registerAgentTeamsTools } from '../lib/tools.js'
 import { createTeamDir, readTeam } from '../lib/state.js'
@@ -971,8 +970,8 @@ console.log('quality-gates TDD — tool-level closed loop')
     status: 'idle',
     options: { provider: 'fake', model: 'fake-model' },
     session: {
-      header: { cwd: workspace },
-      ownEvents: () => [],
+      header: { cwd: workspace, seedLength: 0 },
+      events: [],
       append() {},
       requestHeader() {
         return { config: { provider: 'fake', model: 'fake-model', reasoningEffort: 'high' } }
@@ -995,12 +994,13 @@ console.log('quality-gates TDD — tool-level closed loop')
       listeners.set(name, current)
       return () => listeners.set(name, current.filter((item) => item !== listener))
     },
-    agents: { get(id) { return liveAgents.get(id) }, list() { return [...liveAgents.values()] } },
+    agents: { list: () => [], get(id) { return liveAgents.get(id) } },
     llm: {
       async resolveCallConfig(config) { return config },
       async listModels() { return [] },
     },
     subagents: {
+      registerContinuableSetup() { return () => {} },
       getProvider(name) {
         if (name !== 'spawn') return undefined
         return { prepareContinuable() {}, capabilities: { persona: true, toolFilter: true } }
@@ -1024,8 +1024,7 @@ console.log('quality-gates TDD — tool-level closed loop')
       },
       async listChildren() { return children },
       async listDescendants() { return children },
-      [deliverSubagentPrompt]() { return Promise.resolve(`message-${childSeq}`) },
-      sendMessage() { return Promise.resolve(`message-${childSeq}`) },
+      async followup() { return `message-${childSeq}` },
       interrupt() {},
       async drainContinuableChildren(_parent, ids) { for (const id of ids) liveAgents.delete(id) },
     },
@@ -1099,8 +1098,8 @@ console.log('quality-gates TDD — tool-level closed loop')
       status: 'idle',
       options: { provider: 'fake', model: 'fake-model' },
       session: {
-        header: { cwd: workspace },
-        ownEvents: () => [],
+        header: { cwd: workspace, seedLength: 0 },
+        events: [],
         append() {},
         requestHeader() {
           return { config: { provider: 'fake', model: 'fake-model', reasoningEffort: 'high' } }
