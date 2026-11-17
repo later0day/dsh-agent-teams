@@ -3,7 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { join } from 'node:path'
 import { acknowledgeMailbox, CAPTAIN_KEY, discardMailboxMessages, findTeamByCaptain, readMailbox, readUnreadMailbox, readTeam, sanitizeKey, withTeamLock } from './state.ts'
 import type { TeamMessage, TeamState } from './types.ts'
-import { sessionOwnEvents } from './harness-compat.ts'
+import { sessionOwnEvents, successfulSubagentSettlement } from './harness-compat.ts'
 import { leadIdentityOfAsync, sessionLeadsTeamAsync } from './lineage.ts'
 
 const PREFIX = 'AgentTeams inbox receipt: '
@@ -30,14 +30,24 @@ function mailboxBody(recipient: string, messages: readonly TeamMessage[]): strin
       : `AgentTeams message from ${message.from}${message.attemptId === undefined ? '' : ` for task ${message.taskId}, attempt_id ${message.attemptId}`}:\n\n${mailboxContent(message)}`).join('\n\n')
 }
 
+/** Read current mail while the caller holds the lock and has verified the team. */
+export async function readCurrentMailboxLocked(root: string, team: TeamState, recipient: string, onMalformed?: (line: number) => void): Promise<TeamMessage[]> {
+  const messages = await readUnreadMailbox(root, team.id, recipient, onMalformed)
+  const current: TeamMessage[] = []
+  const staleIds: string[] = []
+  for (const message of messages) {
+    if (isCurrentMail(team, message)) current.push(message)
+    else staleIds.push(message.id)
+  }
+  await discardMailboxMessages(root, team.id, recipient, staleIds)
+  return current
+}
+
 /** Fallback reads must enforce the same current-generation rule as live admission. */
 export async function readCurrentMailbox(root: string, teamId: string, recipient: string, onMalformed?: (line: number) => void): Promise<TeamMessage[]> {
   return withTeamLock(`team:${root}:${teamId}`, async () => {
     const team = await readTeam(root, teamId)
-    if (team === undefined) return []
-    const messages = await readUnreadMailbox(root, teamId, recipient, onMalformed)
-    await discardMailboxMessages(root, teamId, recipient, messages.filter(message => !isCurrentMail(team, message)).map(message => message.id))
-    return messages.filter(message => isCurrentMail(team, message))
+    return team === undefined ? [] : readCurrentMailboxLocked(root, team, recipient, onMalformed)
   })
 }
 
@@ -70,8 +80,7 @@ export function installMailboxAdmission(ctx: Context, stateDir: string): void {
     // result. Keep abnormal endings and missing reports as fallback signals.
     const successfulSettlements = new Set(decision.messages.flatMap(input => {
       const source = input.source
-      return source?.kind === 'subagent-settled'
-        && source.summary === `Background subagent ${source.senderSessionId} finished and will do no further work unless you send it more.`
+      return successfulSubagentSettlement(source)
         ? [source.senderSessionId as string] : []
     }))
     const redundantSettlements = new Set<string>()
@@ -145,8 +154,7 @@ export function installMailboxAdmission(ctx: Context, stateDir: string): void {
     }
     const admitted = []
     for (const { input, receipt, batch } of inputs) {
-      if (input.source?.kind === 'subagent-settled' && redundantSettlements.has(input.source.senderSessionId)
-        && input.source.summary === `Background subagent ${input.source.senderSessionId} finished and will do no further work unless you send it more.`) continue
+      if (successfulSubagentSettlement(input.source) && redundantSettlements.has(input.source.senderSessionId)) continue
       if (receipt === undefined || batch === undefined || batch.failed === true) { admitted.push(input); continue }
       const messages = []
       for (const id of receipt.ids) {

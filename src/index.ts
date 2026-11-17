@@ -43,9 +43,10 @@ import { leadIdentityOfAsync } from './lineage.ts'
 import { formatProfilesForPrompt, type TeamProfileConfig } from './profiles.ts'
 import { parseToolPolicies, type MemberToolPolicy } from './tool-policies.ts'
 import { installTeamCapabilities } from './capabilities.ts'
+import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
 
-import { authenticatedWebRoutes, readJsonRequest, RequestBodyError, type BrowserRequestGate, type WebRouteHost } from './web-routes.ts'
+import { authenticatedWebRoutes, readJsonRequest, RequestBodyError, writeJsonWithEtag, type BrowserRequestGate, type WebRouteHost } from './web-routes.ts'
 
 /** Web-server service key candidates, newest first. */
 const WEB_SERVER_KEYS = ['webServer', 'httpServer'] as const
@@ -261,6 +262,7 @@ export function apply(ctx: Context, config: Config): void {
     path: '/plugins/dsh-agent-teams/state',
     handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://x')
+      const captainSessionId = url.searchParams.get('session')?.trim() || undefined
       const roots = workspaceRegistry.list().map((workspace) => ({
         workspace: workspace.title,
         // The panel audits the same current bytes as agent_teams_status, so it
@@ -270,14 +272,9 @@ export function apply(ctx: Context, config: Config): void {
       }))
       // ?archived=1 serves teams moved to archive/ (post-delete review).
       const snapshots = url.searchParams.get('archived') === '1'
-        ? await collectArchivedTeamsActivity(ctx, roots)
-        : await collectTeamsActivity(ctx, roots)
-      const body = JSON.stringify({ teams: snapshots })
-      res.writeHead(200, {
-        'content-type': 'application/json; charset=utf-8',
-        'cache-control': 'no-store',
-      })
-      res.end(body)
+        ? await collectArchivedTeamsActivity(ctx, roots, captainSessionId)
+        : await collectTeamsActivity(ctx, roots, captainSessionId, url.searchParams.get('summary') === '1')
+      writeJsonWithEtag(req, res, JSON.stringify({ teams: snapshots }))
     },
   }), 'agent-teams: activity route')
 
@@ -384,7 +381,7 @@ export function apply(ctx: Context, config: Config): void {
             try {
               captain.steer(createUserMessage({
                 content: [{ type: 'text', text: stagedPlanApprovedContext(team.name) }],
-                source: { kind: 'agent-teams' },
+                source: agentTeamsSource({ kind: 'agent-teams' }, observedSessionFormatVersion(captain)),
               }))
             } catch (error) {
               // Approval is already committed. Do not report a failed approval
