@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 
 /** Public WebServer route surface used by the plugin. */
 export interface WebRouteHost {
@@ -11,7 +10,54 @@ export interface WebRouteHost {
   }): () => void
 }
 
-export type BrowserRequestGate = Pick<HostConnectionService, 'requestRejection'>
+/**
+ * rc.3 admission face. `HostConnectionService.admit` re-enters cordis's traced
+ * service proxy and demands the caller inject `connection.authentication`,
+ * which this plugin cannot hard-require (headless profiles mount no web stack).
+ * The nested credential registry answers the same verdict without the inject
+ * demand; the Host/Origin fence itself moved to the webserver's centralized
+ * `webserver/authorize` step in rc.3. Declared structurally so the plugin
+ * typechecks against any 0.2.x peer resolution.
+ */
+export interface BrowserRequestGate {
+  authenticate(request: IncomingMessage): BrowserRequestVerdict
+}
+
+/**
+ * Released 0.2.x face. npm `dsh-client-connection` (through 0.2.2-rc.5) ships
+ * no `connection.authentication` registry; its `HostConnectionService` answers
+ * with the bare rejection status (401 | 403 | undefined) through
+ * `requestRejection`. The fork's source deployment mounts the rc.3 registry
+ * and matches the primary face above.
+ */
+export interface LegacyBrowserRequestGate {
+  requestRejection(request: IncomingMessage): 401 | 403 | undefined
+}
+
+/** Adapts either live Connection face to the primary gate. */
+export function normalizeBrowserRequestGate(service: unknown): BrowserRequestGate | undefined {
+  const candidate = service as Partial<BrowserRequestGate & LegacyBrowserRequestGate> | undefined
+  if (candidate === null || typeof candidate !== 'object') return undefined
+  const authenticate = candidate.authenticate?.bind(candidate)
+  if (typeof authenticate === 'function') return { authenticate: (request) => authenticate(request) }
+  const requestRejection = candidate.requestRejection?.bind(candidate)
+  if (typeof requestRejection === 'function') {
+    return {
+      // The service method is extracted, so bind it back or `this` is lost;
+      // it answers with the bare status, undefined meaning "may proceed".
+      authenticate: (request: IncomingMessage): BrowserRequestVerdict => {
+        const rejection = requestRejection(request)
+        return rejection === undefined ? { peer: undefined } : { rejection }
+      },
+    }
+  }
+  return undefined
+}
+
+/** Credential verdict: a live peer serves; anything else is a refusal. */
+export type BrowserRequestVerdict =
+  | { peer: unknown }
+  | { rejection: 401 | 403 | 503 }
 
 export class RequestBodyError extends Error {
   constructor(message: string, readonly status: 400 | 413) {
@@ -108,9 +154,16 @@ export function authenticatedWebRoutes(
         ...route,
         async handler(req, res) {
           const gate = connection()
-          // Missing/disposing Connection is an assembly failure, never an
+          // Missing/disposing registry is an assembly failure, never an
           // invitation to expose workspace state or accept plan mutations.
-          const rejection = gate === undefined ? 503 : gate.requestRejection(req)
+          // The verdict comes from Connection's own credential registry; the
+          // Host/Origin fence already ran in the webserver's authorize step.
+          // The verdict is a live peer or a rejection; an unexpected answer
+          // is a refusal, never a pass.
+          const verdict = gate?.authenticate(req)
+          const rejection = verdict === undefined || 'peer' in verdict
+            ? (verdict === undefined ? 503 : undefined)
+            : verdict.rejection
           if (rejection !== undefined) {
             res.writeHead(rejection, {
               'content-type': 'application/json; charset=utf-8',

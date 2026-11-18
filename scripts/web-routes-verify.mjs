@@ -5,7 +5,7 @@ import { createServer, request } from 'node:http'
 import { once } from 'node:events'
 import { Context } from '@deepseek-ai/cordis'
 import { apply as installConnection } from '@deepseek-ai/dsh-client-connection'
-import { authenticatedWebRoutes, readJsonRequest, RequestBodyError } from '../lib/web-routes.js'
+import { authenticatedWebRoutes, normalizeBrowserRequestGate, readJsonRequest, RequestBodyError } from '../lib/web-routes.js'
 
 const ctx = new Context()
 const routes = new Map()
@@ -68,7 +68,10 @@ const routePlugin = {
 
 try {
   await installConnection(ctx, {})
-  gate = ctx.connection
+  // The raw service carries the exchange face (authenticatedUrl, cookies);
+  // the normalized gate only answers admission verdicts.
+  const connectionService = ctx.get("connection")
+  gate = normalizeBrowserRequestGate(connectionService)
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   const base = `http://127.0.0.1:${server.address().port}`
@@ -82,7 +85,7 @@ try {
   }
   assert.equal(calls, 0, 'unauthenticated requests must not read or mutate team state')
 
-  const exchange = await fetch(gate.authenticatedUrl(base), { redirect: 'manual' })
+  const exchange = await fetch(connectionService.authenticatedUrl(base), { redirect: 'manual' })
   assert.equal(exchange.status, 303)
   const cookie = exchange.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   assert(cookie, 'real Connection must issue a browser cookie')
@@ -129,7 +132,7 @@ try {
 
   await fiber.dispose()
   assert(paths.every(path => !routes.has(path)), 'unload removes every owned route')
-  gate = ctx.connection
+  gate = normalizeBrowserRequestGate(ctx.get("connection"))
   const reloaded = ctx.plugin(routePlugin)
   await reloaded.inertia
   assert(paths.every(path => routes.has(path)), 'reload restores exactly one registration')

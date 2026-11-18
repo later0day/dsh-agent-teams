@@ -46,7 +46,7 @@ import { installTeamCapabilities } from './capabilities.ts'
 import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
 
-import { authenticatedWebRoutes, readJsonRequest, RequestBodyError, writeJsonWithEtag, type BrowserRequestGate, type WebRouteHost } from './web-routes.ts'
+import { authenticatedWebRoutes, normalizeBrowserRequestGate, readJsonRequest, RequestBodyError, writeJsonWithEtag, type WebRouteHost } from './web-routes.ts'
 
 /** Web-server service key candidates, newest first. */
 const WEB_SERVER_KEYS = ['webServer', 'httpServer'] as const
@@ -251,7 +251,13 @@ export function apply(ctx: Context, config: Config): void {
     const rawWebServer = (ctx.get(WEB_SERVER_KEYS[0]) ?? ctx.get(WEB_SERVER_KEYS[1])) as WebRouteHost | undefined
     const workspaceRegistry = (ctx.get(WORKSPACE_KEYS[0]) ?? ctx.get(WORKSPACE_KEYS[1])) as WorkspaceRegistry | undefined
     if (rawWebServer === undefined || workspaceRegistry === undefined) return
-    const webServer = authenticatedWebRoutes(rawWebServer, () => ctx.get('connection') as BrowserRequestGate | undefined)
+    // rc.3 gate: the nested credential registry, read directly from the global
+    // service store (no inject demand), answers the browser's auth verdict;
+    // released npm harnesses expose the same verdict through the connection
+    // service's requestRejection, so both faces serve the routes.
+    const webServer = authenticatedWebRoutes(rawWebServer, () =>
+      normalizeBrowserRequestGate(ctx.get('connection.authentication'))
+      ?? normalizeBrowserRequestGate(ctx.get('connection')))
     webRegistered = true
 
     // Activity panel data route: the browser floater polls this for team
