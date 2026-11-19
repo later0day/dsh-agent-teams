@@ -688,6 +688,14 @@ try {
     let rejected = false; try { await call('agent_teams_edit_plan', { operations: [operation] }) } catch { rejected = true }
     check('running edits reject active attempts, cycles and roster changes: ' + JSON.stringify(operation), rejected)
   }
+  let runningRosterError = ''
+  try {
+    await call('agent_teams_edit_plan', { operations: [{ action: 'remove_member', member_name: 'implementer' }] })
+  } catch (error) { runningRosterError = String(error) }
+  check('running edit_plan directs the captain to the live tools (#348)',
+    /agent_teams_edit_plan.*running/.test(runningRosterError)
+      && ['create_task', 'add_member', 'remove_member', 'reassign_task', 'update_task']
+        .every(tool => runningRosterError.includes('agent_teams_' + tool)))
   const abandoned = await call('agent_teams_create_task', { subject: 'Cancelled planning mistake', assignee: 'implementer', dependencies: [dynamicFirst.task_id] })
   const cancelledPending = await call('agent_teams_update_task', { task_id: abandoned.task_id, status: 'cancelled', output: 'No execution began; captain corrected the plan.' })
   check('captain can cancel dependency-blocked member work before its first attempt', cancelledPending.status === 'cancelled' && cancelledPending.attempt === 0)
@@ -980,6 +988,25 @@ try {
       && disposedParkedAlpha.attemptId === alphaClaim.attempt_id
       && deliveries.length === deliveriesBeforeDisposedParkedKicks)
   liveAgents.set(alpha.id, alpha)
+
+  // A guidance turn resumes this same attempt. Harness becomes idle before
+  // the plugin's asynchronous idle listener has necessarily finished (#103).
+  await call('agent_teams_send_message', { to: 'alpha', content: 'Continue the current attempt.' })
+  publishStatus(alpha, 'running')
+  const deadline = Date.now() + 5_000
+  while ((await state()).members.find(member => member.id === alpha.id)?.status !== 'working') {
+    if (Date.now() >= deadline) throw new Error('alpha did not enter the guidance turn')
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+  const alphaDeliveries = () => deliveries.filter(delivery => delivery.childId === alpha.id).length
+  const beforeGuidancePoll = alphaDeliveries()
+  alpha.status = 'idle'
+  await call('agent_teams_status', {})
+  const afterGuidance = await task(t1.task_id)
+  check('poll before guidance idle is recorded keeps the open attempt without redelivery (#103)',
+    afterGuidance?.status === 'in_progress' && afterGuidance.attempt === alphaClaim.attempt
+      && afterGuidance.attemptId === alphaClaim.attempt_id && alphaDeliveries() === beforeGuidancePoll)
+  publishStatus(alpha, 'idle')
 
   // Unobserved recovery whose followup fails must restore the original open
   // capability and consume that generation's budget. Later status kicks must
