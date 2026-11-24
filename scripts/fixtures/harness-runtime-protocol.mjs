@@ -69,18 +69,18 @@ class ProtocolAdapter extends LlmAdapter {
         if (scenario.phase === 'revise') {
             if (scenario.step++ === 0) {
                 const args = { operations: [{ action: 'update_task', task_id: 't1', subject: 'Recovered task' }] };
-                yield* scenario.ptc ? call('run_code', { code: `return await tools.agent_teams_edit_plan(${JSON.stringify(args)});`, description: 'Revise the existing staged task after history compaction' }) : call('agent_teams_edit_plan', args);
+                yield* scenario.ptc ? call('run_code', { code: `return await inspect(tools.agent_teams_edit_plan(${JSON.stringify(args)}));`, description: 'Revise the existing staged task after history compaction' }) : call('agent_teams_edit_plan', args);
             } else yield* textChunks('EXISTING_PLAN_REVISED');
             return;
         }
         if (scenario.phase === 'archive') {
-            if (scenario.step++ === 0) yield* scenario.ptc ? call('run_code', { code: 'return await tools.agent_teams_delete({});', description: 'Archive the team at the user request' }) : call('agent_teams_delete', {});
+            if (scenario.step++ === 0) yield* scenario.ptc ? call('run_code', { code: 'return await inspect(tools.agent_teams_delete({}));', description: 'Archive the team at the user request' }) : call('agent_teams_delete', {});
             else yield* textChunks('TEAM_ARCHIVED');
             return;
         }
         if (scenario.ptc && scenario.step === 1) {
             scenario.step++;
-            yield* call('run_code', { code: 'await tools.agent_teams_status({}); return "STATUS_OUTPUT_DISCARDED\\n" + "historical-output ".repeat(1000);', description: 'Inspect current team status, retaining only a receipt' });
+            yield* call('run_code', { code: 'await inspect(tools.agent_teams_status({})); return inspect("STATUS_OUTPUT_DISCARDED\\n" + "historical-output ".repeat(1000));', description: 'Inspect current team status, retaining only a receipt' });
             return;
         }
         if (scenario.ptc && scenario.step === 2) {
@@ -97,7 +97,7 @@ class ProtocolAdapter extends LlmAdapter {
         ];
         if (step >= actions.length) { yield* textChunks('STAGED_PLAN_READY'); return; }
         const [name, args] = actions[step];
-        yield* scenario.ptc ? call('run_code', { code: `return await tools.${name}(${JSON.stringify(args)});`, description: 'Build the user-reviewable staged plan' }) : call(name, args);
+        yield* scenario.ptc ? call('run_code', { code: `return await inspect(tools.${name}(${JSON.stringify(args)}));`, description: 'Build the user-reviewable staged plan' }) : call(name, args);
     }
 }
 

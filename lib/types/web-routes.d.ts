@@ -29,6 +29,18 @@ export interface BrowserRequestGate {
 export interface LegacyBrowserRequestGate {
     requestRejection(request: IncomingMessage): 401 | 403 | undefined;
 }
+/**
+ * 0.2.2-rc.5 face. `HostConnectionService.admit` applies the source policy and
+ * answers a `PeerAdmission`: `{ peer }` admits, `{ rejection }` denies with the
+ * HTTP status.
+ */
+export interface AdmitBrowserRequestGate {
+    admit(request: IncomingMessage): {
+        peer?: unknown;
+    } | {
+        rejection: 401 | 403 | 503;
+    };
+}
 /** Adapts either live Connection face to the primary gate. */
 export declare function normalizeBrowserRequestGate(service: unknown): BrowserRequestGate | undefined;
 /** Credential verdict: a live peer serves; anything else is a refusal. */

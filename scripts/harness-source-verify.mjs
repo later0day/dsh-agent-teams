@@ -163,7 +163,7 @@ export async function verifySource(argv) {
     const flags = parseSourceArguments(argv);
     const host = realpathSync(resolve(flags.get('--host-dir'))), artifact = realpathSync(resolve(flags.get('--artifact'))), report = resolve(flags.get('--report-dir'));
     if (existsSync(report) && readdirSync(report).length) throw Error('Report directory must be new or empty');
-    const git = (...args) => execFileSync('git', ['-C', host, ...args], { encoding: 'utf8' }).trim();
+    const git = (...args) => execFileSync('git', ['-C', host, ...args], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }).trim();
     const sourceCommit = git('rev-parse', 'HEAD'), sourceStatus = git('status', '--porcelain', '--untracked-files=no');
     const policy = readJson(join(scriptDir, '../compatibility.json'));
     const candidate = selectSourceCandidate(policy, flags.get('--candidate-version'), sourceCommit, sourceStatus === '');

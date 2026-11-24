@@ -95,5 +95,13 @@
       ],
       "legacyDirectInstallReason": "Historical direct-fixture coverage only; native plugin-manager installation has not been qualified for this target."
     }
+  ],
+  "sourceCandidates": [
+    {
+      "version": "0.2.2-rc.5",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "commit": "c1263fd55c7f2403bb90fe8c4b5bb96e2ed4f161",
+      "evidence": "release-notes/v0.1.31.md"
+    }
   ]
 }

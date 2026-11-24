@@ -34,9 +34,18 @@ export interface LegacyBrowserRequestGate {
   requestRejection(request: IncomingMessage): 401 | 403 | undefined
 }
 
+/**
+ * 0.2.2-rc.5 face. `HostConnectionService.admit` applies the source policy and
+ * answers a `PeerAdmission`: `{ peer }` admits, `{ rejection }` denies with the
+ * HTTP status.
+ */
+export interface AdmitBrowserRequestGate {
+  admit(request: IncomingMessage): { peer?: unknown } | { rejection: 401 | 403 | 503 }
+}
+
 /** Adapts either live Connection face to the primary gate. */
 export function normalizeBrowserRequestGate(service: unknown): BrowserRequestGate | undefined {
-  const candidate = service as Partial<BrowserRequestGate & LegacyBrowserRequestGate> | undefined
+  const candidate = service as Partial<BrowserRequestGate & LegacyBrowserRequestGate & AdmitBrowserRequestGate> | undefined
   if (candidate === null || typeof candidate !== 'object') return undefined
   const authenticate = candidate.authenticate?.bind(candidate)
   if (typeof authenticate === 'function') return { authenticate: (request) => authenticate(request) }
@@ -48,6 +57,17 @@ export function normalizeBrowserRequestGate(service: unknown): BrowserRequestGat
       authenticate: (request: IncomingMessage): BrowserRequestVerdict => {
         const rejection = requestRejection(request)
         return rejection === undefined ? { peer: undefined } : { rejection }
+      },
+    }
+  }
+  const admit = candidate.admit?.bind(candidate)
+  if (typeof admit === 'function') {
+    return {
+      // 0.2.2-rc.5 face: admit applies the source policy and answers a
+      // PeerAdmission; a rejection denies, a peer admits.
+      authenticate: (request: IncomingMessage): BrowserRequestVerdict => {
+        const admission = admit(request)
+        return 'rejection' in admission ? { rejection: admission.rejection } : { peer: admission.peer }
       },
     }
   }

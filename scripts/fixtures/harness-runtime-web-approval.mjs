@@ -174,7 +174,6 @@ export function apply(ctx) {
     // The real browser auth service owns token exchange and cookie verification.
     // An index shell is sufficient; the product approval route remains untouched.
     ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/', handler(req, res) {
-        if (!ctx.connection.authorizeIndex(req, res)) return;
         res.writeHead(200, { 'content-type': 'text/plain' });
         res.end('Web approval fixture');
     } }));
@@ -200,7 +199,11 @@ export function apply(ctx) {
         record({ event: 'web-staged-idle', sessionId: captain.id, status: captain.status, teamId: staged.id });
 
         const baseUrl = `http://127.0.0.1:${ctx.webServer.port}`;
-        const auth = await fetch(ctx.connection.authenticatedUrl(baseUrl), { redirect: 'manual', signal: AbortSignal.timeout(10000) });
+        const entries = [];
+        ctx.emit(ctx.webServer, 'webserver/entry-url', baseUrl, entries);
+        const entryUrl = entries.find(entry => entry.label === 'dsh web')?.url;
+        assert.ok(entryUrl, 'host-authentication-token must publish the token exchange URL');
+        const auth = await fetch(entryUrl, { redirect: 'manual', signal: AbortSignal.timeout(10000) });
         assert.equal(auth.status, 303, 'The real browser token exchange must issue a cookie');
         const cookie = auth.headers.get('set-cookie')?.split(';', 1)[0];
         assert.ok(cookie, 'The real connection must mint a browser cookie');

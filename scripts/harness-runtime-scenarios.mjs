@@ -101,6 +101,8 @@ for (const scenario of selectedScenarios) {
         port: 0
     - id: runtime-lab-connection
       name: '@deepseek-ai/dsh-client-connection'
+    - id: runtime-lab-auth-token
+      name: '@deepseek-ai/dsh-host-authentication-token'
     - id: runtime-lab-workspace
       name: '@deepseek-ai/dsh-workspace'
     - id: runtime-lab-web-approval
