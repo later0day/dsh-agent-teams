@@ -7,7 +7,10 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { ToolRuntime } from '@deepseek-ai/dsh-tools'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { SystemPrompt, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { NativeToolExecutor, apply as applyNativeExecutor } from '@deepseek-ai/dsh-tool-executor-native'
+import { PtcExecutor } from '@deepseek-ai/dsh-tool-executor-ptc'
 import { installTeamCapabilities, TEAM_MEMBER_PROMPT } from '../lib/capabilities.js'
 import { TEAM_TOOL_NAMES, MEMBER_TOOL_NAMES } from '../lib/tool-names.js'
 import { usageSectionText } from '../lib/index.js'
@@ -25,13 +28,12 @@ async function mountCodeRuntime(host, workspace) {
     const module = await import(pathToFileURL(requireBase.resolve('@deepseek-ai/dsh-' + name)).href)
     const fiber = host.plugin(module.default ?? module.NodePtcRuntime, config)
     fibers.push(fiber)
-    await fiber.await()
+    await fiber
   }
   try {
     let modern = false
     try { requireBase.resolve('@deepseek-ai/dsh-ptc-runtime-node'); modern = true } catch {}
     if (modern) {
-      await load('session-projection')
       let hasWorkingDirectory = false
       try { requireBase.resolve('@deepseek-ai/dsh-working-directory'); hasWorkingDirectory = true } catch {}
       if (hasWorkingDirectory) await load('working-directory')
@@ -39,7 +41,7 @@ async function mountCodeRuntime(host, workspace) {
       await load('subprocess-local')
       await load('sandbox-local')
       await load('sandbox-policy', { mode: 'danger-full-access', workspaceRoot: workspace })
-      await load('ptc-runtime-node', { timeoutMs: 10000, maxOutputBytes: 1048576, maxOldGenerationSizeMb: 128 })
+      await load('ptc-runtime-node', { executionMode: 'per-call', timeoutMs: 10000, maxOutputBytes: 1048576, maxOldGenerationSizeMb: 128 })
     } else await load('code-runtime-worker-thread', { computeMs: 3000, maxWallMs: 10000, maxOutputBytes: 1048576, maxOldGenerationSizeMb: 128 })
     return { dispose: async () => { for (const fiber of fibers.reverse()) await fiber.dispose() } }
   } catch (error) { for (const fiber of fibers.reverse()) await fiber.dispose(); throw error }
@@ -54,10 +56,14 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
   const workspace = await mkdtemp(join(tmpdir(), 'agent-teams-capabilities-'))
   const stateRoot = join(workspace, '.agent-teams')
   const host = new Context()
+  const projections = host.plugin(SessionProjectionRegistry)
+  await projections
   const prompt = host.plugin(SystemPrompt, { includeHarnessIdentity: false })
-  await prompt.await()
-  const tools = host.plugin(ToolRuntime, { mode: 'native' })
-  await tools.await()
+  await prompt
+  const tools = host.plugin(ToolRuntime)
+  await tools
+  const nativeExecutor = host.plugin({ inject: ['tools'], apply: applyNativeExecutor })
+  await nativeExecutor
   const worker = await mountCodeRuntime(host, workspace)
   const agents = []
   const scopes = []
@@ -70,12 +76,12 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
     agents: { get: id => agents.find(agent => agent.id === id) },
     subagents: { followup: async () => {}, registerContinuableSetup: () => noop },
   }, { stateDir: '.agent-teams', memberProvider: 'spawn', memberMaxDepth: 1, maxMembers: 8, profiles: {} })
-  const business = host.plugin({ inject: ['tools'], apply(ctx) {
+  const business = host.plugin({ inject: ['tools', 'systemPrompt'], apply(ctx) {
     owned = ctx
     for (const definition of definitions) ctx.tools.register(definition)
     ctx.provide('agents', { list: () => agents })
   } })
-  await business.await()
+  await business
   const createAgent = (id, parentSession, events = []) => {
     events = events.map((event, seq) => ({ ...event, seq }))
     const agent = { id, status: 'idle', session: { header: { cwd: workspace, parentSession, seedLength: 0 }, events,
@@ -95,10 +101,20 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
   const options = { stateDir: '.agent-teams', isPendingMember: agent => pendingMembers.has(agent.id), captainPrompt: () => core }
   const plugin = { inject: ['tools', 'systemPrompt', 'agents'], apply(ctx) { installTeamCapabilities(ctx, options) } }
   let fiber = host.plugin(plugin)
-  await fiber.await()
+  await fiber
   const assemble = agent => host.systemPrompt.assemble({ agent, scope: agent })
   const names = async agent => (await assemble(agent)).tools.map(tool => tool.name)
-  const execute = (agent, name, args = {}, signal = new AbortController().signal) => host.tools.execute({ name, arguments: args, callId: name + '-test', agent, signal })
+  let callSeq = 0
+  const execute = async (agent, name, args = {}, signal = new AbortController().signal) => {
+    const callId = `${name}-test-${++callSeq}`
+    const batch = await host.tools.execute({
+      calls: [{ type: 'tool-call', id: callId, name, arguments: JSON.stringify(args) }],
+      agent,
+      signal,
+    })
+    assert.equal(batch.results.length, 1)
+    return batch.results[0].result
+  }
   const captainNames = [...TEAM_TOOL_NAMES].sort()
   const header = async agent => { const assembled = await assemble(agent); return JSON.stringify({ system: renderPrompt(assembled), tools: assembled.tools }) }
   const initialHeader = await header(a)
@@ -142,7 +158,7 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
         assert.equal(host.tools.get('agent_teams_open', legacy), undefined)
         assertCaptainProtocol(renderPrompt(await assemble(legacy)))
         for (const name of ['agent_teams_create', 'agent_teams_delete']) {
-          const result = await host.tools.execute({ name, arguments: name === 'agent_teams_create' ? { name: 'Legacy', approval: 'required' } : {}, callId: name + '-legacy', agent: legacy, signal: new AbortController().signal })
+          const result = await execute(legacy, name, name === 'agent_teams_create' ? { name: 'Legacy', approval: 'required' } : {})
           assert.equal(result.isError, false, JSON.stringify(result))
         }
         assertCaptainProtocol(renderPrompt(await assemble(legacy)))
@@ -198,32 +214,38 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
       host.emit('agent/session-start', { agent: child, source: 'resume' })
       assert.deepEqual((await names(child)).sort(), [...MEMBER_TOOL_NAMES].sort())
     })
-    await t.test('supported PTC presentation modes keep the operation SDK stable after status', async () => {
-      for (const mode of ['ptc', ...(!requireDsh('@deepseek-ai/dsh/package.json').version.startsWith('0.2.1') ? ['both'] : [])]) {
-        const restore = a.ctx.tools.presentAs(mode)
+    // Per-agent presentation: the executor lives in the agent's own scope and
+    // shadows the deployment's root native executor for that agent alone.
+    // A disposed record leaves the scope unavailable rather than falling back,
+    // so each swap must dispose the previous declaration and replace it.
+    let currentExecutor
+    const setPtc = () => { try { currentExecutor?.() } finally { currentExecutor = a.ctx.tools.setExecutor(new PtcExecutor(a.ctx)) } }
+    const backToNative = () => { try { currentExecutor?.() } finally { currentExecutor = a.ctx.tools.setExecutor(new NativeToolExecutor(a.ctx)) } }
+    await t.test('scoped PTC presentation keeps the operation SDK stable after status', async () => {
+      setPtc()
+      try {
         const assembly = await assemble(a)
         const sdk = assembly.sections.find(section => section.name === 'tools:sdk').text
         assert.doesNotMatch(sdk, /agent_teams_open/)
         for (const name of TEAM_TOOL_NAMES) assert.ok(sdk.includes(name), name)
         const before = await header(a)
-        const result = await host.tools.execute({ name: 'run_code', arguments: { code: 'return await tools.agent_teams_status({});', description: 'Read current team state' }, callId: 'sdk-status-' + mode, agent: a, signal: new AbortController().signal })
+        const result = await execute(a, 'run_code', { code: 'inspect(await tools.agent_teams_status({}))', description: 'Read current team state' })
         assert.equal(result.isError, false, JSON.stringify(result))
         assert.equal(await header(a), before)
-        restore()
-      }
+      } finally { backToNative() }
     })
     await t.test('real run_code may discard status output without losing operating rules', async () => {
-      const restore = a.ctx.tools.presentAs('ptc')
+      setPtc()
       try {
         const before = await header(a)
-        const result = await host.tools.execute({ name: 'run_code', arguments: { code: 'await tools.agent_teams_status({}); return "STATUS_OUTPUT_DISCARDED";', description: 'Inspect current team without returning the result' }, callId: 'discard-status-output', agent: a, signal: new AbortController().signal })
+        const result = await execute(a, 'run_code', { code: 'await tools.agent_teams_status({}); inspect("STATUS_OUTPUT_DISCARDED")', description: 'Inspect current team without returning the result' })
         assert.equal(result.isError, false, JSON.stringify(result))
         assert.match(JSON.stringify(result.content), /STATUS_OUTPUT_DISCARDED/)
         assert.doesNotMatch(JSON.stringify(result.content), /attempt_id|captain protocol/)
         assert.ok(a.session.events.some(event => event.type === 'tool/ptc-dispatch' && event.data.name === 'agent_teams_status'))
         assertCaptainProtocol(renderPrompt(await assemble(a)))
         assert.equal(await header(a), before)
-      } finally { restore() }
+      } finally { backToNative() }
     })
     await t.test('HMR removes old masks and restores persisted participants in existing scopes', async () => {
       await fiber.dispose()
@@ -231,7 +253,7 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
       assert.equal((await names(b)).length, 14)
       assert.doesNotMatch(renderPrompt(await assemble(b)), /AgentTeams captain protocol/)
       fiber = host.plugin(plugin)
-      await fiber.await()
+      await fiber
       assert.equal((await names(a)).length, 14)
       assert.deepEqual(await names(b), captainNames)
       assertCaptainProtocol(renderPrompt(await assemble(b)))
@@ -248,7 +270,7 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
       // This new Agent has no historical tool calls. Persisted work is
       // still directly addressable through the original business tools.
       assert.equal(cold.session.events.length, 0)
-      const result = await host.tools.execute({ name: 'agent_teams_status', arguments: {}, callId: 'cold-direct-status', agent: cold, signal: new AbortController().signal })
+      const result = await execute(cold, 'agent_teams_status')
       assert.equal(result.isError, false, JSON.stringify(result))
       assert.match(JSON.stringify(result.content), /Saved/)
       assertCaptainProtocol(renderPrompt(await assemble(cold)))
@@ -262,7 +284,9 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
     await t.test('create, status and archive preserve the prefix in native and nested dispatch', async () => {
       for (const nested of [false, true]) {
         assert.equal(await header(a), initialHeader)
-        const exec = name => host.tools.execute({ name, arguments: name === 'agent_teams_create' ? { name: 'Saved', description: 'Preserve the requested goal', approval: 'required' } : {}, callId: name + '-test', agent: a, signal: new AbortController().signal, ...(nested ? { parent: {} } : {}) })
+        const exec = name => execute(a, name, name === 'agent_teams_create'
+          ? { name: 'Saved', description: 'Preserve the requested goal', approval: 'required' }
+          : {})
         for (const name of ['agent_teams_create', 'agent_teams_status', 'agent_teams_delete']) {
           const result = await exec(name)
           assert.equal(result.isError, false, JSON.stringify(result))
@@ -292,7 +316,8 @@ test('stable tool presentation uses real scoped registry and prompt assembly', a
   } finally {
     await fiber.dispose()
     for (const scope of scopes.reverse()) await scope.dispose()
-    await business.dispose(); await tools.dispose(); await worker.dispose(); await prompt.dispose()
+    await business.dispose(); await worker.dispose(); await nativeExecutor.dispose()
+    await tools.dispose(); await prompt.dispose(); await projections.dispose()
     await rm(workspace, { recursive: true, force: true })
   }
 })

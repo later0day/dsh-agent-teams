@@ -1,107 +1,14 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "recommendedHost": "0.2.2-rc.5",
+  "stablePluginVersion": "0.1.31",
   "previewTag": "next",
+  "hostRequirement": ">=0.2.3-alpha.2 <0.3.0-0",
   "supportedHosts": [
     {
-      "version": "0.2.2-rc.5",
-      "track": "recommended"
-    },
-    {
-      "version": "0.2.2-rc.2",
+      "version": "0.2.3-alpha.2",
       "track": "preview"
-    },
-    {
-      "version": "0.2.2-rc.1",
-      "track": "preview"
-    },
-    {
-      "version": "0.2.1-rc.3",
-      "track": "preview"
-    },
-    {
-      "version": "0.2.1-rc.2",
-      "track": "legacy"
-    },
-    {
-      "version": "0.2.1-rc.1",
-      "track": "legacy",
-      "platforms": [
-        "ubuntu-latest"
-      ],
-      "legacyDirectInstallReason": "Historical direct-fixture coverage only; native plugin-manager installation has not been qualified for this target."
-    },
-    {
-      "version": "0.2.0-rc.2",
-      "track": "legacy",
-      "platforms": [
-        "ubuntu-latest"
-      ],
-      "legacyDirectInstallReason": "Historical direct-fixture coverage only; native plugin-manager installation has not been qualified for this target."
-    },
-    {
-      "version": "0.1.7-rc.2",
-      "track": "legacy",
-      "platforms": [
-        "ubuntu-latest"
-      ],
-      "legacyDirectInstallReason": "Historical direct-fixture coverage only; native plugin-manager installation has not been qualified for this target."
-    },
-    {
-      "version": "0.1.5-rc.3",
-      "track": "legacy",
-      "platforms": [
-        "ubuntu-latest"
-      ],
-      "legacyDirectInstallReason": "Historical direct-fixture coverage only; native plugin-manager installation has not been qualified for this target."
-    },
-    {
-      "version": "0.1.5-rc.2",
-      "track": "legacy",
-      "platforms": [
-        "ubuntu-latest"
-      ],
-      "legacyDirectInstallReason": "Historical direct-fixture coverage only; native plugin-manager installation has not been qualified for this target."
-    },
-    {
-      "version": "0.1.5-rc.1",
-      "track": "legacy",
-      "platforms": [
-        "ubuntu-latest"
-      ],
-      "legacyDirectInstallReason": "Historical direct-fixture coverage only; native plugin-manager installation has not been qualified for this target."
-    },
-    {
-      "version": "0.1.2-rc.1",
-      "track": "legacy",
-      "platforms": [
-        "ubuntu-latest"
-      ],
-      "legacyDirectInstallReason": "Historical direct-fixture coverage only; native plugin-manager installation has not been qualified for this target."
-    },
-    {
-      "version": "0.1.2-alpha.5",
-      "track": "preview",
-      "platforms": [
-        "ubuntu-latest"
-      ],
-      "legacyDirectInstallReason": "Historical direct-fixture coverage only; native plugin-manager installation has not been qualified for this target."
-    },
-    {
-      "version": "0.1.2-alpha.2",
-      "track": "legacy",
-      "platforms": [
-        "ubuntu-latest"
-      ],
-      "legacyDirectInstallReason": "Historical direct-fixture coverage only; native plugin-manager installation has not been qualified for this target."
     }
   ],
-  "sourceCandidates": [
-    {
-      "version": "0.2.2-rc.5",
-      "repository": "https://github.com/deepseek-ai/deepseek-harness",
-      "commit": "c1263fd55c7f2403bb90fe8c4b5bb96e2ed4f161",
-      "evidence": "release-notes/v0.1.31.md"
-    }
-  ]
+  "sourceCandidates": []
 }

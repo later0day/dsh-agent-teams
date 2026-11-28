@@ -29,8 +29,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { ToolRuntime } from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutorPlugin from '@deepseek-ai/dsh-tool-executor-native'
 import { registerAgentTeamsTools } from '../lib/tools.js'
 import { readTeam, sanitizeKey, writeTeam } from '../lib/state.js'
 
@@ -63,10 +65,10 @@ const REAL_PLAN = {
 async function mount() {
   const workspace = await mkdtemp(join(tmpdir(), 'agentteams-234-'))
   const host = new Context()
-  const prompt = host.plugin(SystemPrompt, { includeHarnessIdentity: false })
-  await prompt.await()
-  const runtime = host.plugin(ToolRuntime, { mode: 'native' })
-  await runtime.await()
+  await host.plugin(SessionProjectionRegistry)
+  await host.plugin(SystemPrompt, { includeHarnessIdentity: false })
+  await host.plugin(ToolRuntime)
+  await host.plugin(NativeToolExecutorPlugin)
   const definitions = []
   const agents = []
   const noop = () => {}
@@ -80,7 +82,7 @@ async function mount() {
     subagents: { followup: async () => {}, registerContinuableSetup: () => noop },
   }, { stateDir: '.agent-teams', memberProvider: 'spawn', memberMaxDepth: 1, maxMembers: 8, profiles: PROFILES })
   let owned
-  const business = host.plugin({
+  await host.plugin({
     inject: ['tools'],
     apply(ctx) {
       owned = ctx
@@ -88,7 +90,6 @@ async function mount() {
       ctx.provide('agents', { list: () => agents })
     },
   })
-  await business.await()
   let seq = 0
   const createCaptain = id => {
     const events = []
@@ -113,21 +114,17 @@ async function mount() {
     agents.push(agent)
     return agent
   }
-  const execute = (agent, args) => host.tools.execute({
-    name: 'agent_teams_create',
-    arguments: args,
-    callId: `issue-234-${++seq}`,
-    agent,
-    signal: new AbortController().signal,
-  })
-  /** Dispatch any registered tool through the same real runtime path. */
-  const executeTool = (agent, name, args) => host.tools.execute({
-    name,
-    arguments: args,
-    callId: `issue-234-${name}-${++seq}`,
-    agent,
-    signal: new AbortController().signal,
-  })
+  const executeTool = async (agent, name, args) => {
+    const callId = `issue-234-${name}-${++seq}`
+    const batch = await host.tools.execute({
+      calls: [{ type: 'tool-call', id: callId, name, arguments: JSON.stringify(args) }],
+      agent,
+      signal: new AbortController().signal,
+    })
+    assert.equal(batch.results.length, 1)
+    return batch.results[0].result
+  }
+  const execute = (agent, args) => executeTool(agent, 'agent_teams_create', args)
   const stateRoot = join(workspace, '.agent-teams')
   const loadTeam = teamId => readTeam(stateRoot, teamId)
   const saveTeam = team => writeTeam(stateRoot, team)

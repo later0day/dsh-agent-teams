@@ -127,8 +127,14 @@ async function fixture(t, { captainStatus = 'idle', fallback, captainOffline = f
   let retryState = {}
   const retryDisposers = []
   installRetry({
+    fiber: { uid: 1 },
     logger: ctx.logger,
-    sessionProjections: { register(value) { projection = value }, stateOf() { return retryState } },
+    sessionProjections: {
+      register(value) {
+        projection = value
+        return Promise.resolve({ stateOf() { return retryState } })
+      },
+    },
     on(_name, listener) { retryHandler = listener; return () => {} },
     effect(setup) { retryDisposers.push(setup()) },
   })

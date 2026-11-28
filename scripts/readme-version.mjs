@@ -24,11 +24,11 @@ export function publishedVersions(notesDirectory) {
     .sort()
 }
 
-export function findStaleVersionReferences(markdown, version, known) {
+export function findStaleVersionReferences(markdown, version, known, allowed = [version]) {
   const body = stripReleaseNoteLinks(markdown)
   const stale = []
   for (const candidate of known) {
-    if (candidate === version) continue
+    if (allowed.includes(candidate)) continue
     // Match whole versions only: `0.1.5` must not be found inside `0.1.5-rc.1`.
     const pattern = new RegExp(`(?<![0-9A-Za-z.-])${escapeForRegExp(candidate)}(?![0-9A-Za-z.-])`, 'g')
     for (const match of body.matchAll(pattern)) {
@@ -42,16 +42,18 @@ export function findPinnedInstallVersions(markdown) {
   return [...markdown.matchAll(/@nanmicoder\/dsh-agent-teams@([0-9A-Za-z.-]+)/g)].map(match => match[1])
 }
 
-export function checkReadmeVersions({ version, known, files }) {
+export function checkReadmeVersions({ version, known, files, allowed = [version] }) {
   const problems = []
   for (const [name, markdown] of Object.entries(files)) {
-    for (const stale of findStaleVersionReferences(markdown, version, known)) {
+    for (const stale of findStaleVersionReferences(markdown, version, known, allowed)) {
       problems.push(`${name} still names ${stale.version} outside a release-notes link`)
     }
     for (const pinned of findPinnedInstallVersions(markdown)) {
       // The stable channel requests an update without pinning a numeric version.
-      if (pinned !== version && pinned !== 'latest') {
-        problems.push(`${name} pins @nanmicoder/dsh-agent-teams@${pinned} but the package is ${version}`)
+      if (!allowed.includes(pinned) && pinned !== 'latest') {
+        problems.push(allowed.length === 1
+          ? `${name} pins @nanmicoder/dsh-agent-teams@${pinned} but the package is ${version}`
+          : `${name} pins @nanmicoder/dsh-agent-teams@${pinned} but allowed versions are ${allowed.join(', ')}`)
       }
     }
   }
@@ -60,6 +62,7 @@ export function checkReadmeVersions({ version, known, files }) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  const compatibility = JSON.parse(readFileSync(new URL('../compatibility.json', import.meta.url), 'utf8'))
   const notesDirectory = fileURLToPath(new URL('../release-notes', import.meta.url))
   const files = Object.fromEntries(
     README_FILES.map(name => [name, readFileSync(new URL(`../${name}`, import.meta.url), 'utf8')])
@@ -67,7 +70,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const problems = checkReadmeVersions({
     version: pkg.version,
     known: publishedVersions(notesDirectory),
-    files
+    files,
+    allowed: [pkg.version, compatibility.stablePluginVersion],
   })
   if (problems.length > 0) {
     console.error(`README version check failed for ${pkg.version}:`)

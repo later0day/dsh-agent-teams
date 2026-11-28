@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { SubagentRuntime } from '@deepseek-ai/dsh-subagent'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { drainMemberChildren, guardSubagentCreation, guardSubagentDelivery, installContinuableMemberSetup, memberToolFilter, queueMemberPrompt, restrictableToolNames, findOwnSessionEvent, startMember, steerMemberPrompt } from '../lib/harness-compat.js'
 import { installMemberSelectionRuntime, spawnMember } from '../lib/members.js'
 import { createTeamDir } from '../lib/state.js'
@@ -135,10 +136,18 @@ function child({ workspace = process.cwd(), effort, inherited = false } = {}) {
     version: 3, mode: 'continuable', provider: 'spawn', label: 'agent-teams:team:worker',
     agentProvider: 'primary', agentModel: 'model',
   } }
+  let selected = { provider: 'inherited', model: 'parent-model', reasoningEffort: 'low' }
   const agent = {
     id: 'member-id', status: 'idle', whenIdle: async () => {},
     options: { provider: 'primary', model: 'model', reasoningEffort: effort },
     session: { header: { cwd: workspace, parentSession: 'captain' }, ownEvents: () => inherited ? [] : [descriptor] },
+    model: {
+      current: () => ({ ...selected }),
+      select(selection) { selected = { ...selection } },
+    },
+    cancel(cause, options) { agent.cancelled = { cause, options } },
+    followup(message) { agent.followups.push(message) },
+    followups: [],
   }
   agent.ctx = scope() // Harness 0.1.5 no longer exposes Context.agent.
   return agent
@@ -148,7 +157,8 @@ async function selection(agent) {
   for (const assemble of agent.ctx.listeners.get('system-prompt/assemble') ?? []) {
     await assemble({}, {}, async () => ({ variables: {} }))
   }
-  return requestSelection(agent)
+  await requestSelection(agent)
+  return agent.model.current()
 }
 
 async function requestSelection(agent) {
@@ -162,10 +172,10 @@ async function requestSelection(agent) {
 
 await test('native SubagentRuntime keeps its receiver through FIFO delivery and retirement guard', async t => {
   const host = new Context()
+  t.after(() => host.fiber.dispose())
   host.provide('workingDirectory', {})
-  const fiber = host.plugin(SubagentRuntime)
-  t.after(() => fiber.dispose())
-  await fiber.await()
+  await host.plugin(SessionProjectionRegistry)
+  await host.plugin(SubagentRuntime)
   const runtime = host.subagents
   assert.ok(runtime)
   if (typeof runtime.registerContinuableSetup === 'function') {
@@ -192,30 +202,28 @@ await test('native SubagentRuntime keeps its receiver through FIFO delivery and 
   }
   const accepted = []
   const manager = {
-    async followup(parent, id, body, options) {
+    resident: new Map(),
+    async dispose() {},
+    async deliverToMember(parent, id, body, options) {
       assert.equal(this, manager)
-      accepted.push({ path: 'followup', parent, id, body, source: options.source })
-      return 'accepted'
+      options.authorize?.()
+      accepted.push({ path: options.delivery, parent, id, body, source: options.source })
+      return options.delivery === 'steer' ? 'steered' : 'accepted'
     },
-    async queuePrompt(parent, id, body, provenance) {
+    sendMessage(parent, id, body, options) {
       assert.equal(this, manager)
-      accepted.push({ path: 'queue', parent, id, body, source: provenance })
-      return 'accepted'
-    },
-    async sendMessage(parent, id, body) {
-      assert.equal(this, manager)
-      accepted.push({ path: 'steer', parent, id, body })
-      return 'steered'
+      return this.deliverToMember(parent, id, body, {
+        ...options, delivery: 'steer', source: { kind: 'agent', sessionId: parent.id },
+      })
     },
   }
   // Only the downstream continuation manager is replaced. The real Cordis
-  // service method still executes this.requireContinuations(), unlike old fakes.
-  if (typeof runtime.startActivation === 'function') runtime.manager = manager
-  else runtime.continuations = manager
+  // service methods still exercise their receiver and delivery policy.
+  runtime.manager = manager
+  runtime.rootOf = caller => caller
   const captain = { id: 'captain', session: { header: {} } }
   const ctx = scope({ subagents: runtime })
-  const methodKey = typeof runtime.followup === 'function' ? 'followup' : typeof runtime[deliverKey] === 'function' ? deliverKey : queueKey
-  const before = Object.getOwnPropertyDescriptor(runtime, methodKey)
+  const before = Object.getOwnPropertyDescriptor(manager, 'deliverToMember')
   guardSubagentDelivery(ctx, async (_sender, id) => id === 'retired')
   assert.equal(await queueMemberPrompt(runtime, captain, 'active', content, signal), 'accepted')
   assert.deepEqual(accepted[0].source, source)
@@ -226,7 +234,7 @@ await test('native SubagentRuntime keeps its receiver through FIFO delivery and 
     assert.equal(await runtime.sendMessage(captain, 'unrelated', content, { signal }), 'steered')
   }
   ctx.dispose()
-  assert.deepEqual(Object.getOwnPropertyDescriptor(runtime, methodKey), before)
+  assert.deepEqual(Object.getOwnPropertyDescriptor(manager, 'deliverToMember'), before)
   assert.equal(await queueMemberPrompt(runtime, captain, 'retired', content, signal), 'accepted')
 })
 
@@ -332,13 +340,13 @@ await test('synchronous modern setup selects the first request, deduplicates eve
     provider: 'selected', model: 'selected-model', reasoningEffort: 'high',
   }, async () => {
     ctx.emit('agent/session-start', { agent, source: 'startup' })
-    assert.equal(agent.ctx.listeners.get('agent/request').size, 1)
+    assert.equal(agent.ctx.listeners.get('agent/pre-step').size, 2)
     ctx.emit('agent/session-start', { agent, source: 'compact' })
-    assert.equal(agent.ctx.listeners.get('agent/request').size, 1)
+    assert.equal(agent.ctx.listeners.get('agent/pre-step').size, 2)
     assert.deepEqual(await selection(agent), { provider: 'selected', model: 'selected-model', reasoningEffort: 'high' })
   })
   ctx.dispose()
-  assert.equal(agent.ctx.listeners.get('agent/request').size, 0)
+  assert.equal(agent.ctx.listeners.get('agent/pre-step').size, 0)
   assert.equal(agent.ctx.listeners.get('agent/error').size, 0)
   agent.ctx.dispose()
 })
@@ -414,10 +422,10 @@ for (const fallbackActive of [false, true]) {
       assert.equal(delegated, 1)
     } else {
       const handler = [...agent.ctx.listeners.get('agent/request-error')][0]
-      assert.deepEqual(await handler({ agent, signal, failure: { code: 'AUTH' } }, async () => undefined), { kind: 'retry' })
-      // Harness retries inside the SAME step, without assembling the prompt
-      // again. The accepted fallback must replace the captured request route.
-      assert.deepEqual(await requestSelection(agent), { provider: 'backup', model: 'backup-model' })
+      assert.equal(await handler({ agent, turn: 1, signal, failure: { code: 'AUTH', message: 'denied' } }, async () => undefined), undefined)
+      assert.deepEqual(agent.model.current(), { provider: 'backup', model: 'backup-model' })
+      assert.equal(agent.cancelled.cause.reason, 'agent-teams/model-fallback')
+      assert.equal(agent.followups.length, 1)
     }
   })
 }

@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { compareHostVersions, minimumHost, policy, serverRuntimePeers, validatePolicy } from './compatibility.mjs'
+import { acceptsHostVersion, hostRequirement, policy, serverRuntimePeers, validatePolicy } from './compatibility.mjs'
 
 function manifest(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
@@ -74,12 +74,11 @@ export function inspectInstallation(hostRoot, profileRoot, support = policy) {
     problems.push(`Installed plugin ${plugin.version} differs from this policy's plugin ${policyPackage.version}; verify its own host compatibility`)
   }
   const tested = allowed.includes(host.version)
-  const minimum = minimumHost(support)
-  // Matches the published peer range: hosts at or above the oldest tested host may run the plugin.
-  const order = compareHostVersions(host.version, minimum)
-  const installable = tested || sourceCandidate || order >= 0
-  if (order === undefined && !tested && !sourceCandidate) problems.push(`Unsupported host ${host.version}: unrecognized version format`)
-  else if (!installable) problems.push(`Unsupported host ${host.version}; requires >=${minimum}, recommended target is ${support.recommendedHost}`)
+  const requirement = hostRequirement(support)
+  const recognized = /^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(host.version)
+  const installable = tested || Boolean(sourceCandidate) || acceptsHostVersion(host.version, requirement)
+  if (!recognized && !tested && !sourceCandidate) problems.push(`Unsupported host ${host.version}: unrecognized version format`)
+  else if (!installable) problems.push(`Unsupported host ${host.version}; requires ${requirement}, stable recommendation is ${support.recommendedHost}`)
   if (mixed.length) problems.push(`${mixed.length} resolved DSH packages differ from host ${host.version}`)
   if (missing.length) problems.push(`Missing packages: ${[...new Set(missing)].join(', ')}`)
   const identities = new Map()

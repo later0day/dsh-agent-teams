@@ -42,21 +42,32 @@ export function compareHostVersions(left, right) {
   return a.tag < b.tag ? -1 : 1
 }
 
-/**
- * Oldest declared host, source candidates included. Every later host may install the plugin, including
- * hosts released after this package. Removing the oldest tested host therefore raises the requirement.
- */
+/** Oldest declared test target, source candidates included. */
 export function minimumHost(input = policy) {
   return declaredHostVersions(input).sort(compareHostVersions)[0]
 }
 
-/**
- * The published install requirement, written to `engines.dsh`. The official installer reads that field
- * before peers (since 0.2.1-alpha.4) and evaluates it with includePrerelease, so later RC/alpha hosts pass.
- * supportedHosts is the tested CI matrix, not an allowlist: enumerating it blocked every new host release.
- */
+const exactHostVersion = value => typeof value === 'string'
+  && /^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(value)
+  && value.trim() === value
+
+/** Evaluate the bounded host generation declared by this artifact. */
+export function acceptsHostVersion(version, requirement = policy.hostRequirement) {
+  if (!exactHostVersion(version) || typeof requirement !== 'string') return false
+  const match = /^>=(\S+) <(\d+\.\d+\.\d+)-0$/.exec(requirement)
+  if (match === null || !exactHostVersion(match[1])) return false
+  const lower = compareHostVersions(version, match[1])
+  const core = version.split('-', 1)[0].split('.').map(Number)
+  const upperCore = match[2].split('.').map(Number)
+  const belowUpper = core.some((part, index) => part !== upperCore[index]
+    && part < upperCore[index]
+    && core.slice(0, index).every((prior, priorIndex) => prior === upperCore[priorIndex]))
+  return lower !== undefined && lower >= 0 && belowUpper
+}
+
+/** Published install requirement, copied verbatim to `engines.dsh`. */
 export function hostRequirement(input = policy) {
-  return `>=${minimumHost(input)}`
+  return input.hostRequirement
 }
 
 /**
@@ -67,7 +78,19 @@ export function hostRequirement(input = policy) {
 export const HOST_PEER_RANGE = '*'
 
 export function validatePolicy(input) {
-  if (input.schemaVersion !== 1 || input.previewTag !== 'next') throw new Error('Unsupported compatibility policy')
+  if (input.schemaVersion !== 2 || input.previewTag !== 'next') throw new Error('Unsupported compatibility policy')
+  if (!exactHostVersion(input.recommendedHost) || /-(alpha|beta)\./.test(input.recommendedHost)) {
+    throw new Error('Alpha/beta hosts cannot be the ordinary-user recommendation')
+  }
+  if (!exactHostVersion(input.stablePluginVersion) || input.stablePluginVersion.includes('-')) {
+    throw new Error('stablePluginVersion must identify the ordinary latest release')
+  }
+  const requirement = input.hostRequirement
+  const bounds = typeof requirement === 'string' ? /^>=(\S+) <(\d+\.\d+\.\d+)-0$/.exec(requirement) : null
+  if (bounds === null || !exactHostVersion(bounds[1])
+      || compareHostVersions(bounds[1], bounds[2]) !== -1) {
+    throw new Error('hostRequirement must be a valid bounded DSH generation')
+  }
   const hosts = input.supportedHosts
   if (!Array.isArray(hosts) || hosts.length === 0) throw new Error('supportedHosts must list exact tested host targets')
   const versions = new Set()
@@ -78,6 +101,9 @@ export function validatePolicy(input) {
       throw new Error('Host targets must be unique exact versions with an explicit track')
     }
     versions.add(host.version)
+    if (!acceptsHostVersion(host.version, requirement)) {
+      throw new Error(`Host target ${host.version} falls outside hostRequirement ${requirement}`)
+    }
     if (host.platforms !== undefined && (!Array.isArray(host.platforms)
         || !host.platforms.includes('ubuntu-latest')
         || new Set(host.platforms).size !== host.platforms.length
@@ -90,8 +116,9 @@ export function validatePolicy(input) {
     }
   }
   const recommended = hosts.filter(host => host.track === 'recommended')
-  if (recommended.length !== 1 || recommended[0].version !== input.recommendedHost) throw new Error('Exactly one recommended host is required')
-  if (/-(alpha|beta)\./.test(input.recommendedHost)) throw new Error('Alpha/beta hosts cannot be the ordinary-user recommendation')
+  if (recommended.length > 1 || (recommended.length === 1 && recommended[0].version !== input.recommendedHost)) {
+    throw new Error('A matrix recommendation must match the ordinary-user recommendation')
+  }
   const candidates = input.sourceCandidates ?? []
   if (!Array.isArray(candidates)) throw new Error('sourceCandidates must be an array')
   for (const candidate of candidates) {
@@ -102,6 +129,9 @@ export function validatePolicy(input) {
         || typeof candidate.commit !== 'string' || candidate.commit.length !== 40 || !/^[a-f0-9]{40}$/.test(candidate.commit)
         || typeof candidate.evidence !== 'string' || !candidate.evidence.startsWith('docs/')) {
       throw new Error('Source candidates require a unique exact version, official repository, commit and evidence')
+    }
+    if (!acceptsHostVersion(candidate.version, requirement)) {
+      throw new Error(`Source candidate ${candidate.version} falls outside hostRequirement ${requirement}`)
     }
     versions.add(candidate.version)
   }
@@ -157,9 +187,8 @@ export function validatePackageCompatibility(pkg, input = policy, workspace = wo
       if (version !== baseline) throw new Error(`${name} override must match the development host ${baseline}`)
     }
   }
-  // An upper bound or version list here rejects every host released after the plugin.
   if (pkg.engines?.dsh !== requirement) {
-    throw new Error(`engines.dsh must be ${requirement}; an upper bound or version list rejects future hosts`)
+    throw new Error(`engines.dsh must match hostRequirement ${requirement}`)
   }
   for (const [name, declared] of Object.entries(pkg.peerDependencies ?? {})) {
     if (isDshPackage(name) && declared !== HOST_PEER_RANGE) {

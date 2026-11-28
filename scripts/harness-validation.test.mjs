@@ -7,7 +7,7 @@ import { policy } from './compatibility.mjs'
 import { hostVerification, runtimeTargets, requiredRuntimeScenarios, validateRuntimeReport, validateRuntimeReports } from './harness-validation.mjs'
 import { runPluginInstallation } from './harness-runtime-scenarios.mjs'
 
-const futureVersion = '0.2.1-rc.999' // Fictional regression input, never a support claim.
+const futureVersion = '0.2.3-alpha.3' // Fictional regression input, never a support claim.
 const future = { ...policy, supportedHosts: [...policy.supportedHosts, { version: futureVersion, track: 'preview' }] }
 const expected = { pluginVersion: '0.1.26', artifactSha256: 'a'.repeat(64) }
 function reportFor(target, install = true) {
@@ -26,17 +26,14 @@ test('future targets automatically receive both platforms and a required install
   }
 })
 
-test('historical coverage remains explicit without exempting adjacent or unknown versions', () => {
-  for (const host of ['0.2.1-rc.2', '0.2.1-rc.3']) {
-    for (const os of ['ubuntu-latest', 'windows-latest']) assert.ok(runtimeTargets().some(target => target.host === host && target.os === os))
+test('the alpha target has full platform and installation coverage', () => {
+  for (const os of ['ubuntu-latest', 'windows-latest']) {
+    assert.ok(runtimeTargets().some(target => target.host === '0.2.3-alpha.2' && target.os === os))
   }
-  const legacy = { host: '0.2.1-rc.1', os: 'ubuntu-latest' }
-  assert.ok(hostVerification(legacy.host).legacyDirectInstallReason)
-  assert.doesNotThrow(() => validateRuntimeReport(reportFor(legacy, false), legacy, expected))
-  for (const host of ['0.2.1-rc.2', '0.2.1-rc.3', futureVersion, '0.3.0']) assert.equal(hostVerification(host).pluginManagerInstall, true)
+  for (const host of ['0.2.3-alpha.2', futureVersion]) assert.equal(hostVerification(host).pluginManagerInstall, true)
   for (const version of ['latest', '*', futureVersion + '\n']) assert.throws(() => hostVerification(version), /exact host/)
   for (const properties of [{ platforms: [] }, { platforms: ['windows-latest'] }, { platforms: ['ubuntu-latest', 'macos-latest'] }, { legacyDirectInstallReason: '' }]) {
-    const invalid = { ...policy, supportedHosts: policy.supportedHosts.map((host, i) => i ? host : { ...host, ...properties }) }
+    const invalid = { ...policy, supportedHosts: policy.supportedHosts.map(host => ({ ...host, ...properties })) }
     assert.throws(() => runtimeTargets(invalid))
   }
 })
@@ -90,6 +87,6 @@ test('real installation entry is invoked for an unknown candidate and preserves 
   installedVersion = expected.pluginVersion; timedOut = true
   assert.equal((await runPluginInstallation(options))[0].passed, false)
   assert.equal(calls, 4)
-  assert.deepEqual(await runPluginInstallation({ ...options, version: '0.2.1-rc.1' }), [])
-  assert.equal(calls, 4, 'Historical limitation must not silently change coverage')
+  assert.equal((await runPluginInstallation({ ...options, version: '0.2.2-rc.5' }))[0].passed, false)
+  assert.equal(calls, 5, 'A direct installation probe preserves rejection outside the matrix')
 })

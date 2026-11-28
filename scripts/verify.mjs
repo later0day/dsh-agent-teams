@@ -1494,10 +1494,13 @@ function descriptorEvent(label, agentProvider = 'descriptor-provider', agentMode
 
 function fakeChildContext({ label, parentSessionId, cwd, agentProvider, agentModel }) {
   const listeners = new Map()
+  let selected
   return {
     listeners,
+    selected: () => selected,
     context: {
       agent: {
+        model: { select(selection) { selected = { ...selection } } },
         session: {
           header: { parentSession: parentSessionId, cwd, seedLength: 0 },
           events: [descriptorEvent(label, agentProvider, agentModel)],
@@ -1512,6 +1515,8 @@ function fakeChildContext({ label, parentSessionId, cwd, agentProvider, agentMod
 }
 
 async function routedConfig(child) {
+  const selected = child.selected()
+  if (selected !== undefined) return selected
   const assemble = child.listeners.get('system-prompt/assemble')
   const request = child.listeners.get('agent/request')
   await assemble({}, {}, async () => ({ variables: {} }))

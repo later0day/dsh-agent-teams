@@ -305,7 +305,9 @@ test('#174: hitting the expansion cap is reported, not silently truncated', { sk
 test('#174: an unreadable path is reported as unreadable, never as unchanged or absent', {
   skip: artifacts === undefined
     ? 'artifacts module missing in this build'
-    : process.platform === 'win32' ? 'POSIX permission probe' : false,
+    : process.platform === 'win32'
+      ? 'POSIX permission probe'
+      : process.getuid?.() === 0 ? 'POSIX permission probe requires non-root' : false,
 }, () => {
   const root = workspace()
   try {
@@ -426,7 +428,9 @@ test('#174/#161: the production audit carries current gaps, and an over-cap scop
 test('#161: an unreadable current artifact makes the production audit incomplete and blocks delivery', {
   skip: artifacts === undefined
     ? 'artifacts module missing in this build'
-    : process.platform === 'win32' ? 'POSIX permission probe' : false,
+    : process.platform === 'win32'
+      ? 'POSIX permission probe'
+      : process.getuid?.() === 0 ? 'POSIX permission probe requires non-root' : false,
 }, async () => {
   const root = workspace()
   try {

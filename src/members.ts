@@ -808,7 +808,7 @@ export function installMemberSelectionRuntime(
     const model = (child as Agent & { model?: { select(selection: Readonly<ModelSelection>): void } }).model
     const nativeModel = typeof model?.select === 'function' ? model : undefined
     nativeModel?.select(selectionRef.current)
-    const disposeSelection = installModelSelection(childCtx, selectionRef)
+    const disposeSelection = installModelSelection(childCtx)
     const fallback = selection.fallback
     let switched = false
     const recoveryLifetime = new AbortController()
@@ -1009,7 +1009,7 @@ export async function spawnMember(
   const provider = ctx.subagents.getProvider(config.provider)
   if (provider === undefined) {
     throw new Error(
-      `agent-teams: no subagent provider "${config.provider}" is registered (available: ${ctx.subagents.list().join(', ') || 'none'}) — `
+      `agent-teams: no subagent provider "${config.provider}" is registered — `
       + 'check that the subagent provider row (e.g. subagent-spawn) is mounted in the composition',
     )
   }

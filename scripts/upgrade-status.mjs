@@ -1,14 +1,22 @@
 /** Read-only release visibility. Registry discovery never adds a host to the tested matrix. */
+import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { compareHostVersions, policy, requiredHostPeers, validatePolicy } from './compatibility.mjs'
+import { acceptsHostVersion, compareHostVersions, policy, requiredHostPeers, validatePolicy } from './compatibility.mjs'
+
+const ownManifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+export const pluginChannel = ownManifest.publishConfig.tag
 
 const exactVersion = value => typeof value === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:alpha|beta|rc)\.(0|[1-9]\d*))?$/.test(value) && value.trim() === value
 
-// Understands the current `>=x` engines.dsh and `*` peers, and the exact lists of releases
-// up to 0.1.27. Anything else requires review instead of a guessed semver answer.
+// Understands the current bounded generation, historical `>=x` engines.dsh,
+// `*` peers and exact release lists. Anything else requires review.
 function parseDeclaration(value) {
   if (typeof value !== 'string') return undefined
   if (value === '*') return () => true
+  const bounded = /^>=(\S+) <(\d+\.\d+\.\d+)-0$/.exec(value)
+  if (bounded && exactVersion(bounded[1])) {
+    return version => acceptsHostVersion(version, value)
+  }
   const lower = /^>=(\S+)$/.exec(value)
   if (lower && exactVersion(lower[1])) return version => compareHostVersions(version, lower[1]) >= 0
   const versions = value.split('||').map(v => v.trim())
@@ -21,7 +29,7 @@ export function inspectUpgradeStatus({ hostTags, pluginManifest }, support = pol
   if (!hostTags || !exactVersion(hostTags.latest)
       || !exactVersion(hostTags.next)) throw new Error('Registry must return exact latest/next host identities')
   if (pluginManifest?.name !== '@nanmicoder/dsh-agent-teams' || !exactVersion(pluginManifest.version)) throw new Error('Registry plugin identity mismatch')
-  const channels = Object.fromEntries(['latest', 'next'].filter(tag => hostTags[tag]).map(tag => [tag, hostTags[tag]]))
+  const channels = { [pluginChannel]: hostTags[pluginChannel] }
   const unverifiedChannels = Object.entries(channels).filter(([, version]) => !supported.includes(version)).map(([channel, version]) => ({ channel, version }))
   const fields = Object.hasOwn(pluginManifest.engines ?? {}, 'dsh')
     ? { 'engines.dsh': pluginManifest.engines.dsh }
@@ -39,7 +47,7 @@ export function inspectUpgradeStatus({ hostTags, pluginManifest }, support = pol
   return {
     needsAttention: unverifiedChannels.length > 0 || unrecognizedDeclarations.length > 0 || blockedChannels?.length > 0 || unpublishedSupport?.length > 0,
     hostChannels: channels,
-    pluginChannel: 'latest', pluginVersion: pluginManifest.version,
+    pluginChannel, pluginVersion: pluginManifest.version,
     blockedChannels, unverifiedChannels, unpublishedSupport, unrecognizedDeclarations,
     limits: ['Compares declarations only; does not prove runtime compatibility or publish anything.', 'Checks host latest/next and plugin latest; other tags and untagged releases require an explicit audit.'],
   }
@@ -53,7 +61,7 @@ export async function fetchUpgradeStatus(fetcher = fetch, support = policy) {
   }
   const [hostTags, pluginManifest] = await Promise.all([
     read('-/package/@deepseek-ai%2Fdsh/dist-tags'),
-    read('@nanmicoder%2Fdsh-agent-teams/latest'),
+    read(`@nanmicoder%2Fdsh-agent-teams/${pluginChannel}`),
   ])
   return inspectUpgradeStatus({ hostTags, pluginManifest }, support)
 }

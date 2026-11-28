@@ -46,7 +46,7 @@ import { installTeamCapabilities } from './capabilities.ts'
 import { agentTeamsSource, observedSessionFormatVersion } from './harness-compat.ts'
 import { TEAM_TOOL_NAMES } from './tool-names.ts'
 
-import { authenticatedWebRoutes, normalizeBrowserRequestGate, readJsonRequest, RequestBodyError, writeJsonWithEtag, type WebRouteHost } from './web-routes.ts'
+import { readJsonRequest, RequestBodyError, writeJsonWithEtag, type WebRouteHost } from './web-routes.ts'
 
 /** Web-server service key candidates, newest first. */
 const WEB_SERVER_KEYS = ['webServer', 'httpServer'] as const
@@ -251,13 +251,7 @@ export function apply(ctx: Context, config: Config): void {
     const rawWebServer = (ctx.get(WEB_SERVER_KEYS[0]) ?? ctx.get(WEB_SERVER_KEYS[1])) as WebRouteHost | undefined
     const workspaceRegistry = (ctx.get(WORKSPACE_KEYS[0]) ?? ctx.get(WORKSPACE_KEYS[1])) as WorkspaceRegistry | undefined
     if (rawWebServer === undefined || workspaceRegistry === undefined) return
-    // rc.3 gate: the nested credential registry, read directly from the global
-    // service store (no inject demand), answers the browser's auth verdict;
-    // released npm harnesses expose the same verdict through the connection
-    // service's requestRejection, so both faces serve the routes.
-    const webServer = authenticatedWebRoutes(rawWebServer, () =>
-      normalizeBrowserRequestGate(ctx.get('connection.authentication'))
-      ?? normalizeBrowserRequestGate(ctx.get('connection')))
+    const webServer = rawWebServer
     webRegistered = true
 
     // Activity panel data route: the browser floater polls this for team
@@ -266,6 +260,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.effect(() => webServer.register({
     kind: 'exact',
     path: '/plugins/dsh-agent-teams/state',
+    auth: 'required',
     handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://x')
       const captainSessionId = url.searchParams.get('session')?.trim() || undefined
@@ -287,6 +282,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.effect(() => webServer.register({
       kind: 'exact',
       path: '/plugins/dsh-agent-teams/halt',
+      auth: 'required',
       handler: async (req, res) => {
         if (req.method !== 'POST') {
           res.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' })
@@ -342,6 +338,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.effect(() => webServer.register({
       kind: 'exact',
       path: '/plugins/dsh-agent-teams/plan',
+      auth: 'required',
       handler: async (req, res) => {
         if (req.method !== 'POST') {
           res.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' })
@@ -494,6 +491,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.effect(() => webServer.register({
       kind: 'prefix',
       path: '/plugins/dsh-agent-teams/assets',
+      auth: 'required',
     handler: async (req, res) => {
       let name: string
       try {

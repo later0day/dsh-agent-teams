@@ -5,7 +5,7 @@ import { inspectUpgradeStatus, fetchUpgradeStatus } from './upgrade-status.mjs'
 import { policy } from './compatibility.mjs'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-const fixture = () => ({ hostTags: { latest: policy.recommendedHost, next: '0.2.1-rc.3' }, pluginManifest: structuredClone(pkg) })
+const fixture = () => ({ hostTags: { latest: policy.recommendedHost, next: '0.2.3-alpha.2' }, pluginManifest: structuredClone(pkg) })
 
 test('a known supported and published combination has no declaration gap', () => {
   const result = inspectUpgradeStatus(fixture())
@@ -23,41 +23,42 @@ test('a published exact allowlist that rejects the host channels is reported as 
   }
   const result = inspectUpgradeStatus(input)
   assert.equal(result.needsAttention, true)
-  assert.deepEqual(result.blockedChannels, [{ channel: 'latest', version: '0.2.1-rc.5' }, { channel: 'next', version: '0.2.1-rc.5' }])
+  assert.deepEqual(result.blockedChannels, [{ channel: 'next', version: '0.2.1-rc.5' }])
   assert.deepEqual(result.unpublishedSupport, [])
   assert.deepEqual(result.unrecognizedDeclarations, [])
 })
 
-test('same plugin version does not hide support merged into source but absent on npm', () => {
+test('same plugin version does not hide tested support absent from its manifest', () => {
   const input = fixture()
-  input.pluginManifest.engines.dsh = '>=0.2.1-rc.1'
+  input.pluginManifest.engines.dsh = '>=0.2.3-alpha.3 <0.3.0-0'
   const result = inspectUpgradeStatus(input)
   assert.equal(result.pluginVersion, pkg.version)
   assert.equal(result.needsAttention, true)
-  assert.deepEqual(result.blockedChannels, [])
-  assert.ok(result.unpublishedSupport.includes('0.2.0-rc.2'))
-  assert.ok(!result.unpublishedSupport.includes('0.2.1-rc.3'))
+  assert.deepEqual(result.blockedChannels, [{ channel: 'next', version: '0.2.3-alpha.2' }])
+  assert.deepEqual(result.unpublishedSupport, ['0.2.3-alpha.2'])
 })
 
 test('a new upstream host is installable but still asks maintainers to run the matrix', () => {
   const input = fixture(), before = structuredClone(policy)
-  input.hostTags.next = '0.2.1-rc.999'
+  input.hostTags.next = '0.2.3-alpha.3'
   const result = inspectUpgradeStatus(input)
   assert.equal(result.needsAttention, true)
   assert.deepEqual(result.blockedChannels, [])
-  assert.deepEqual(result.unverifiedChannels, [{ channel: 'next', version: '0.2.1-rc.999' }])
+  assert.deepEqual(result.unverifiedChannels, [{ channel: 'next', version: '0.2.3-alpha.3' }])
   assert.deepEqual(policy, before)
 })
 
 test('engines precedence, missing declarations and unfamiliar ranges cannot report a false all-clear', () => {
-  for (const dsh of [null, '^0.2.1-rc.2', '>=0.2.1-rc.2 <0.3.0', '0.2.1-rc.2']) {
+  for (const dsh of [null, '^0.2.3-alpha.2', '>=0.2.3-alpha.2 <0.3.0']) {
     const input = fixture()
     input.pluginManifest.engines.dsh = dsh
     const result = inspectUpgradeStatus(input)
     assert.equal(result.needsAttention, true)
-    if (dsh !== '0.2.1-rc.2') assert.deepEqual(result.unrecognizedDeclarations, ['engines.dsh'])
-    else assert.ok(result.unpublishedSupport.includes('0.2.1-rc.3'))
+    assert.deepEqual(result.unrecognizedDeclarations, ['engines.dsh'])
   }
+  const exact = fixture()
+  exact.pluginManifest.engines.dsh = '0.2.3-alpha.3'
+  assert.deepEqual(inspectUpgradeStatus(exact).unpublishedSupport, ['0.2.3-alpha.2'])
   // Without engines.dsh (hosts before 0.2.1-alpha.4 and older manifests) every DSH peer must be readable.
   const input = fixture()
   delete input.pluginManifest.engines.dsh

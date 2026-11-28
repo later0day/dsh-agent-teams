@@ -36,7 +36,7 @@
 
 ## 版本更新
 
-[最新发布](https://github.com/NanmiCoder/dsh-agent-teams/releases/latest) 修复指导消息导致的重复派工，保留一次性建队时的成员提示词，并按需读取长会话事件。推荐宿主为 Harness `0.2.2-rc.5`。详见[测试矩阵](./compatibility.json)和[发布说明](./release-notes/v0.1.31.md)。
+普通用户的[最新正式版](https://github.com/NanmiCoder/dsh-agent-teams/releases/latest)仍是 Harness `0.2.2-rc.5` 搭配 AgentTeams `0.1.31`。选择性测试的 `0.1.32-alpha.0` 预览版只支持 Harness `0.2.3-alpha.2`，并使用 npm `next` 渠道，不替代稳定推荐组合。详见[测试矩阵](./compatibility.json)和[发布说明](./release-notes/v0.1.31.md)。
 
 ## 为什么需要 AgentTeams？
 
@@ -54,20 +54,14 @@
 
 ## 安装与版本选择
 
-**推荐组合为 DeepSeek Harness `0.2.2-rc.5` 和 AgentTeams `0.1.31`。**
+**稳定推荐组合为 DeepSeek Harness `0.2.2-rc.5` 和 AgentTeams `0.1.31`。**
 
 | 使用场景 | DeepSeek Harness | AgentTeams 插件 |
 | --- | --- | --- |
-| **推荐版本** | **`0.2.2-rc.5`** | **`0.1.31`** |
-| 其他已测 RC | `0.2.2-rc.2`、`0.2.2-rc.1`、`0.2.1-rc.3`、`0.2.1-rc.2` | `0.1.31` |
-| 上一推荐 RC | `0.2.1-rc.1`, `0.2.0-rc.2`, `0.1.7-rc.2` | `0.1.31` |
-| 保留旧 RC | `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.5-rc.3` | `0.1.31` |
-| 保留旧 RC | `0.1.2-rc.1` | `0.1.31` |
-| 开发者测试 Alpha | `0.1.2-alpha.5` | `0.1.31` |
-| 保留旧 Alpha | `0.1.2-alpha.2` | `0.1.31` |
-| 其他可安装宿主 | `0.1.2-alpha.2` 及以上 | `0.1.31` |
+| **普通稳定版** | **`0.2.2-rc.5`** | **`0.1.31`（`latest`）** |
+| 选择性 Alpha 预览 | `0.2.3-alpha.2` | `0.1.32-alpha.0`（`next`） |
 
-CI 验证表中最后一行之前的精确宿主版本。安装器也接受达到最低版本要求的其他宿主。
+当前预览版 CI 在 Ubuntu 和 Windows 验证 `0.2.3-alpha.2`。安装范围为 `>=0.2.3-alpha.2 <0.3.0-0`；旧的 0.2.2 宿主继续使用稳定插件。
 
 ### 桌面端
 
@@ -106,6 +100,12 @@ dsh --version
 
 ```sh
 dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.31
+```
+
+选择 Alpha 组合时，先使用 Harness `0.2.3-alpha.2`，再显式安装插件预览版：
+
+```sh
+dsh plugin --profile web add --save-exact @nanmicoder/dsh-agent-teams@0.1.32-alpha.0
 ```
 
 CLI 管理的安装可将 `web` 换成实际使用的 CLI profile。**安装后，停止并重新启动该 profile 的 Harness 进程，再刷新浏览器。** 安装插件不会自动升级宿主；Harness 的 `latest` 与插件的 `latest` 是两个独立渠道。
